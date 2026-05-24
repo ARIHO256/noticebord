@@ -456,7 +456,7 @@ export default function ConversationScreen({ route, navigation }: Props) {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: '#ECE5DD' }]}>
-      <HeaderBar title={title || 'Conversation'} subtitle={noticeTitle} left={headerLeft} showProfileAvatar={false} />
+      <HeaderBar title={title || 'Conversation'} subtitle={noticeTitle || undefined} left={headerLeft} showProfileAvatar={false} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.select({ ios: 'padding', android: 'height' })}

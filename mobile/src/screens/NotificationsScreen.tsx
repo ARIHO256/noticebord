@@ -252,7 +252,7 @@ export default function NotificationsScreen() {
               <MaterialCommunityIcons name="check-all" size={20} color={theme.colors.primary} />
             </TouchableOpacity>
             <TouchableOpacity onPress={handleDeleteAllRead} style={styles.headerButton}>
-              <MaterialCommunityIcons name="delete-sweep" size={20} color={theme.colors.error || '#FF3B30'} />
+                  <MaterialCommunityIcons name="delete-sweep" size={20} color={theme.colors.danger || '#FF3B30'} />
             </TouchableOpacity>
           </View>
         )}

@@ -402,9 +402,9 @@ export default function FriendsScreen({ navigation }: any) {
     return filteredSuggestions.filter((profile) => profile?.id && !requestIds.has(profile.id)).slice(0, 6);
   }, [filteredSuggestions, friendRequests]);
 
-  const data = useMemo(() => {
-    if (tab === 'friends') return filteredFriends;
-    return filteredIncoming;
+  const data = useMemo<any[]>(() => {
+    if (tab === 'friends') return filteredFriends as any[];
+    return filteredIncoming as any[];
   }, [filteredFriends, filteredIncoming, tab]);
 
   const currentUserId = currentUser?.id ?? null;

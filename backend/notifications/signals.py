@@ -1,6 +1,8 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.conf import settings
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 from .models import Notification, NotificationPreference
 from .tasks import send_push_notification, send_email_notification
 
@@ -45,6 +47,37 @@ def create_notification(user, notification_type, title, message, sender=None, da
         sender=sender,
         data=data or {},
     )
+
+    # Broadcast real-time event to the user's websocket room.
+    channel_layer = get_channel_layer()
+    if channel_layer:
+        unread_count = Notification.objects.filter(user=user, is_read=False).count()
+        payload = {
+            "id": str(notification.id),
+            "notification_type": notification.notification_type,
+            "title": notification.title,
+            "message": notification.message,
+            "data": notification.data or {},
+            "sender": str(notification.sender_id) if notification.sender_id else None,
+            "is_read": notification.is_read,
+            "read_at": notification.read_at.isoformat() if notification.read_at else None,
+            "push_sent": notification.push_sent,
+            "created_at": notification.created_at.isoformat(),
+        }
+        async_to_sync(channel_layer.group_send)(
+            f"user_{user.id}_notifications",
+            {
+                "type": "notification_message",
+                "notification": payload,
+            },
+        )
+        async_to_sync(channel_layer.group_send)(
+            f"user_{user.id}_notifications",
+            {
+                "type": "unread_count_update",
+                "count": unread_count,
+            },
+        )
     
     # Trigger push notification async
     push_field = pref_field.replace("notify_", "push_") if pref_field else None

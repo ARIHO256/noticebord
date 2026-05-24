@@ -5,7 +5,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from notices.models import Notice
-from users.models import Friendship
+from users.models import Friendship, UserBlock
 from users.serializers import MiniUserSerializer
 
 from .models import Conversation, ConversationMessage
@@ -157,6 +157,8 @@ class ConversationCreateSerializer(serializers.Serializer):
 
         if recipient == user:
             raise serializers.ValidationError("You cannot start a conversation with yourself.")
+        if UserBlock.is_blocked_between(user, recipient):
+            raise serializers.ValidationError("Messaging is unavailable due to privacy settings.")
         # Staff can message anyone; others must be friends first.
         if not getattr(user, "is_staff", False) and not Friendship.are_friends(user, recipient):
             raise serializers.ValidationError("You can only message friends once requests are accepted.")
@@ -244,6 +246,8 @@ class MessageCreateSerializer(serializers.Serializer):
         conversation: Conversation = self.context["conversation"]
         user = request.user
         other_user = conversation.other_user(user)
+        if other_user and UserBlock.is_blocked_between(user, other_user):
+            raise serializers.ValidationError("Messaging is unavailable due to privacy settings.")
         # Staff can message anyone; others must be friends.
         if not getattr(user, "is_staff", False) and not Friendship.are_friends(user, other_user):
             raise serializers.ValidationError("You can only message friends.")

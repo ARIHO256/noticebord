@@ -6,8 +6,20 @@ interface WebSocketMessage {
   [key: string]: any;
 }
 
+const MAX_RECONNECT_ATTEMPTS = 5;
+const BASE_RECONNECT_DELAY_MS = 3000;
+const MAX_RECONNECT_DELAY_MS = 30000;
+
+function getReconnectDelay(attempt: number): number {
+  const exponential = BASE_RECONNECT_DELAY_MS * Math.pow(2, attempt);
+  return Math.min(exponential, MAX_RECONNECT_DELAY_MS);
+}
+
 export function useNotificationsWebSocket(token: string | null) {
   const ws = useRef<WebSocket | null>(null);
+  const reconnectAttempts = useRef(0);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMounted = useRef(true);
   const [connected, setConnected] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
@@ -19,6 +31,7 @@ export function useNotificationsWebSocket(token: string | null) {
     const socket = new WebSocket(`${wsUrl}/ws/notifications/?token=${token}`);
 
     socket.onopen = () => {
+      reconnectAttempts.current = 0;
       setConnected(true);
     };
 
@@ -40,8 +53,15 @@ export function useNotificationsWebSocket(token: string | null) {
     socket.onclose = () => {
       setConnected(false);
       ws.current = null;
-      // Reconnect after 3 seconds
-      setTimeout(connect, 3000);
+
+      if (!isMounted.current) return;
+
+      if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
+        const delay = getReconnectDelay(reconnectAttempts.current);
+        reconnectAttempts.current += 1;
+        reconnectTimer.current = setTimeout(connect, delay);
+      }
+      // After MAX_RECONNECT_ATTEMPTS, stop trying until token changes
     };
 
     socket.onerror = () => {
@@ -52,6 +72,10 @@ export function useNotificationsWebSocket(token: string | null) {
   }, [token]);
 
   const disconnect = useCallback(() => {
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
     ws.current?.close();
     ws.current = null;
     setConnected(false);
@@ -72,8 +96,13 @@ export function useNotificationsWebSocket(token: string | null) {
   }, [send]);
 
   useEffect(() => {
+    isMounted.current = true;
+    reconnectAttempts.current = 0;
     connect();
-    return () => disconnect();
+    return () => {
+      isMounted.current = false;
+      disconnect();
+    };
   }, [connect, disconnect]);
 
   // Keep-alive ping every 30 seconds
@@ -88,6 +117,9 @@ export function useNotificationsWebSocket(token: string | null) {
 
 export function useConversationWebSocket(token: string | null, conversationId: string | null) {
   const ws = useRef<WebSocket | null>(null);
+  const reconnectAttempts = useRef(0);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMounted = useRef(true);
   const [connected, setConnected] = useState(false);
   const [typingUser, setTypingUser] = useState<string | null>(null);
   const [lastMessage, setLastMessage] = useState<any>(null);
@@ -99,6 +131,7 @@ export function useConversationWebSocket(token: string | null, conversationId: s
     const socket = new WebSocket(`${wsUrl}/ws/conversations/${conversationId}/?token=${token}`);
 
     socket.onopen = () => {
+      reconnectAttempts.current = 0;
       setConnected(true);
     };
 
@@ -120,7 +153,14 @@ export function useConversationWebSocket(token: string | null, conversationId: s
     socket.onclose = () => {
       setConnected(false);
       ws.current = null;
-      setTimeout(connect, 3000);
+
+      if (!isMounted.current) return;
+
+      if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
+        const delay = getReconnectDelay(reconnectAttempts.current);
+        reconnectAttempts.current += 1;
+        reconnectTimer.current = setTimeout(connect, delay);
+      }
     };
 
     socket.onerror = () => {
@@ -131,6 +171,10 @@ export function useConversationWebSocket(token: string | null, conversationId: s
   }, [token, conversationId]);
 
   const disconnect = useCallback(() => {
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
     ws.current?.close();
     ws.current = null;
     setConnected(false);
@@ -151,8 +195,13 @@ export function useConversationWebSocket(token: string | null, conversationId: s
   }, [send]);
 
   useEffect(() => {
+    isMounted.current = true;
+    reconnectAttempts.current = 0;
     connect();
-    return () => disconnect();
+    return () => {
+      isMounted.current = false;
+      disconnect();
+    };
   }, [connect, disconnect]);
 
   return { connected, typingUser, lastMessage, sendTyping, markMessageRead };

@@ -128,6 +128,7 @@ class NoticeViewSet(viewsets.ModelViewSet):
             "trending",
             "most_liked",
             "suggested",
+            "report",
         }
         if getattr(self, "action", None) in unrestricted_actions:
             return [permissions.IsAuthenticated()]
@@ -169,6 +170,15 @@ class NoticeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = super().get_queryset()
+        from users.models import UserBlock, UserMute
+
+        # Respect social safety/privacy controls.
+        blocked_by_me = UserBlock.objects.filter(blocker=user).values_list("blocked_id", flat=True)
+        blocked_me = UserBlock.objects.filter(blocked=user).values_list("blocker_id", flat=True)
+        muted_by_me = UserMute.objects.filter(muter=user).values_list("muted_id", flat=True)
+        qs = qs.exclude(created_by_id__in=blocked_by_me)
+        qs = qs.exclude(created_by_id__in=blocked_me)
+        qs = qs.exclude(created_by_id__in=muted_by_me)
 
         # Check if this is a retrieve action (accessing a specific post by ID)
         # For retrieve, admin/staff should be able to access suspended posts
@@ -919,6 +929,8 @@ class NoticeViewSet(viewsets.ModelViewSet):
         
         from django.db import connection
         
+        base_queryset = self.get_queryset()
+
         if connection.vendor == "postgresql":
             from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank
             
@@ -930,7 +942,7 @@ class NoticeViewSet(viewsets.ModelViewSet):
             search_query = SearchQuery(query)
             
             results = (
-                Notice.objects.annotate(
+                base_queryset.annotate(
                     rank=SearchRank(search_vector, search_query)
                 )
                 .filter(rank__gte=0.1)
@@ -938,7 +950,7 @@ class NoticeViewSet(viewsets.ModelViewSet):
             )
         else:
             # Fallback for SQLite and other databases
-            results = Notice.objects.filter(
+            results = base_queryset.filter(
                 Q(title__icontains=query)
                 | Q(description__icontains=query)
                 | Q(department__icontains=query)

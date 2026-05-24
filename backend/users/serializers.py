@@ -3,7 +3,16 @@ from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .models import DeviceToken, FriendRequest, Friendship, User, UserDesignation, get_friend_status
+from .models import (
+    DeviceToken,
+    FriendRequest,
+    Friendship,
+    User,
+    UserBlock,
+    UserDesignation,
+    UserMute,
+    get_friend_status,
+)
 
 
 class MiniUserSerializer(serializers.ModelSerializer):
@@ -107,6 +116,27 @@ class UserSerializer(serializers.ModelSerializer):
         return instance
 
 
+class PublicUserSerializer(UserSerializer):
+    class Meta(UserSerializer.Meta):
+        fields = [
+            "id",
+            "username",
+            "first_name",
+            "last_name",
+            "is_faculty",
+            "designation",
+            "department",
+            "school",
+            "course",
+            "academic_year",
+            "avatar_url",
+            "friend_status",
+            "friend_request_id",
+            "mutual_friend_count",
+        ]
+        read_only_fields = fields
+
+
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     first_name = serializers.CharField(required=True)
@@ -198,6 +228,24 @@ class DeviceTokenSerializer(serializers.ModelSerializer):
         fields = ["token"]
 
 
+class UserBlockSerializer(serializers.ModelSerializer):
+    blocked_user = MiniUserSerializer(source="blocked", read_only=True)
+
+    class Meta:
+        model = UserBlock
+        fields = ["id", "blocked", "blocked_user", "created_at"]
+        read_only_fields = ["id", "blocked_user", "created_at"]
+
+
+class UserMuteSerializer(serializers.ModelSerializer):
+    muted_user = MiniUserSerializer(source="muted", read_only=True)
+
+    class Meta:
+        model = UserMute
+        fields = ["id", "muted", "muted_user", "created_at"]
+        read_only_fields = ["id", "muted_user", "created_at"]
+
+
 class FriendRequestSerializer(serializers.ModelSerializer):
     sender = MiniUserSerializer(read_only=True)
     receiver = MiniUserSerializer(read_only=True)
@@ -228,6 +276,8 @@ class FriendRequestSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"receiver_id": "User not found."}) from exc
         if receiver == viewer:
             raise serializers.ValidationError("You cannot send a friend request to yourself.")
+        if UserBlock.is_blocked_between(viewer, receiver):
+            raise serializers.ValidationError("Friend requests are unavailable due to privacy settings.")
         if Friendship.are_friends(viewer, receiver):
             raise serializers.ValidationError("You are already friends.")
         if FriendRequest.pending_between(viewer, receiver):

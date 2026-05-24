@@ -264,13 +264,16 @@ export const moderateText = async (text: string): Promise<ModerationResult> => {
     const response = await api.post<ModerationResult>('/moderation/check-text/', {
       text,
     });
-    // Only block if backend explicitly says it's unsafe AND it's profanity
-    // Allow everything else through (spam warnings, etc.)
-    if (!response.data.isSafe && response.data.categories?.includes('profanity')) {
-      return response.data;
+    const backendResult = response.data;
+    // Only block if backend explicitly says it's unsafe AND it's profanity.
+    if (!backendResult.isSafe && backendResult.categories?.includes('profanity')) {
+      return backendResult;
     }
-    // If backend says unsafe but it's not profanity (e.g., spam), allow it
-    return { isSafe: true, ...response.data };
+    // If backend says unsafe but it's not profanity (e.g. spam), allow it.
+    if (!backendResult.isSafe) {
+      return { ...backendResult, isSafe: true, reason: undefined };
+    }
+    return backendResult;
   } catch (error: any) {
     // If backend check fails, allow the content (fail open)
     // This prevents blocking legitimate comments when the moderation service has issues
@@ -420,4 +423,3 @@ export const moderateContent = async (options: {
     reason,
   };
 };
-

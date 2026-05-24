@@ -12,6 +12,7 @@ from .serializers import (
     MessageCreateSerializer,
 )
 from users.throttling import MessageRateThrottle
+from users.models import UserBlock
 
 
 class ConversationViewSet(viewsets.ModelViewSet):
@@ -21,8 +22,12 @@ class ConversationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        blocked_by_me = UserBlock.objects.filter(blocker=user).values_list("blocked_id", flat=True)
+        blocked_me = UserBlock.objects.filter(blocked=user).values_list("blocker_id", flat=True)
+        blocked_ids = list(set(blocked_by_me).union(set(blocked_me)))
         return (
             Conversation.objects.filter(models.Q(user_a=user) | models.Q(user_b=user))
+            .exclude(models.Q(user_a_id__in=blocked_ids) | models.Q(user_b_id__in=blocked_ids))
             .select_related("user_a", "user_b", "notice", "last_message_by")
             .order_by("-last_message_at", "-updated_at")
         )
@@ -66,7 +71,9 @@ class ConversationViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         
         # POST request - validate message text before saving
-        message_text = request.data.get('text', '')
+        message_text = request.data.get("content", "")
+        if isinstance(message_text, list):
+            message_text = message_text[0] if message_text else ""
         
         # Check message text for violations
         text_result = check_text_content(message_text)

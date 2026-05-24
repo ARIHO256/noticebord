@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DeviceToken, FriendRequest, Friendship, SuspensionAppeal, User
+from .models import DeviceToken, FriendRequest, Friendship, SuspensionAppeal, User, UserBlock, UserMute
 
 
 @admin.register(User)
@@ -43,3 +43,14 @@ class SuspensionAppealAdmin(admin.ModelAdmin):
     search_fields = ("user__username", "message")
     readonly_fields = ("created_at", "reviewed_at")
 
+
+@admin.register(UserBlock)
+class UserBlockAdmin(admin.ModelAdmin):
+    list_display = ("id", "blocker", "blocked", "created_at")
+    search_fields = ("blocker__username", "blocked__username")
+
+
+@admin.register(UserMute)
+class UserMuteAdmin(admin.ModelAdmin):
+    list_display = ("id", "muter", "muted", "created_at")
+    search_fields = ("muter__username", "muted__username")

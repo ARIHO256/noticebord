@@ -1004,7 +1004,7 @@ function CreateNoticeScreen({ navigation, route }: any) {
                       render={({ field: { value, onChange } }) => (
                         <OptionPicker
                           label="Department"
-                          value={value}
+                          value={value || ''}
                           options={DEPARTMENTS_BY_SCHOOL[selectedSchool] || []}
                           onChange={(val) => {
                             onChange(val);

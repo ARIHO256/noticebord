@@ -73,7 +73,7 @@ def generate_data_export(self, export_id):
             })
         
         # Export likes
-        for like in user.likes.all():
+        for like in user.notice_likes.all():
             data["likes"].append({
                 "notice_id": str(like.notice_id),
                 "created_at": like.created_at.isoformat(),

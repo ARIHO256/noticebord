@@ -134,7 +134,7 @@ const ToastComponent: React.FC<ToastProps> = ({ toast, onHide }) => {
       ]}
     >
       <View style={styles.content}>
-        <MaterialCommunityIcons name={config.icon as keyof typeof MaterialCommunityIcons.glyphMap} size={24} color={config.iconColor} />
+        <MaterialCommunityIcons name={config.icon as any} size={24} color={config.iconColor} />
         <View style={styles.textContainer}>
           <Text style={styles.message}>{toast.message}</Text>
         </View>

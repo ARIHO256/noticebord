@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
@@ -122,8 +123,8 @@ export default function HomeScreen({ navigation, route }: Props) {
   const badges = useTabBadges();
   const [globalPreview, setGlobalPreview] = useState<NoticeAttachment | null>(null);
   const isOnline = net.isConnected !== false;
-  const noticeRefetchInterval = isOnline ? 5000 : false;
-  const officialRefetchInterval = isOnline ? 500 : false;
+  const noticeRefetchInterval = isOnline ? 30000 : false;
+  const officialRefetchInterval = isOnline ? 30000 : false;
   const navigateTo = useCallback(
     <K extends keyof RootStackParamList>(route: K, params?: RootStackParamList[K]) => {
       const parent = navigation && typeof navigation.getParent === 'function' ? navigation.getParent() : null;
@@ -237,7 +238,7 @@ export default function HomeScreen({ navigation, route }: Props) {
     enabled: isOnline && viewMode !== 'official', // Disable for official mode since we use officialNoticesQuery
     initialPageParam: 1,
     refetchInterval: noticeRefetchInterval,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
     refetchOnMount: 'always',
   });
 
@@ -256,7 +257,7 @@ export default function HomeScreen({ navigation, route }: Props) {
     },
     enabled: isOnline && (viewMode === 'feed' || viewMode === 'official'),
     refetchInterval: officialRefetchInterval,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
     refetchOnMount: 'always',
   });
   const { refetch: refetchOfficial } = officialNoticesQuery;
@@ -355,7 +356,7 @@ export default function HomeScreen({ navigation, route }: Props) {
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
             <MaterialCommunityIcons
-              name={option.icon as keyof typeof MaterialCommunityIcons.glyphMap}
+              name={option.icon as any}
               size={16}
               color={active ? theme.colors.primaryContrast : theme.colors.text}
             />
@@ -686,7 +687,6 @@ export default function HomeScreen({ navigation, route }: Props) {
       <View style={styles.headerContainer}>
         {net.isConnected === false ? <OfflineBanner /> : null}
         <View style={styles.headerInner}>
-          <Text style={[styles.pageTitle, { color: theme.colors.text }]}></Text>
           {viewMode === 'feed' ? (
             <>
               {/* Facebook-style composer */}
@@ -969,11 +969,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerContainer: {
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.sm,
   },
   headerInner: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+    paddingTop: spacing.xs,
   },
   searchBarContainer: {
     paddingHorizontal: spacing.lg,

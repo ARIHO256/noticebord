@@ -138,6 +138,7 @@ type NoticeDetail = {
   created_at: string;
   updated_at: string;
   is_active: boolean;
+  suspension_reason?: string | null;
   views_count?: number;
   likes_count?: number;
   favorites_count?: number;

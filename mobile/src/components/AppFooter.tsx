@@ -68,7 +68,7 @@ export default function AppFooter() {
               },
             ]}
           >
-            <MaterialCommunityIcons name={chip.icon as keyof typeof MaterialCommunityIcons.glyphMap} size={16} color={theme.colors.accent} />
+            <MaterialCommunityIcons name={chip.icon as any} size={16} color={theme.colors.accent} />
             <Text style={[styles.chipText, { color: theme.colors.text }]}>{chip.label}</Text>
           </View>
         ))}

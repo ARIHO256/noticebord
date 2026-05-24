@@ -266,7 +266,8 @@ export default function FacebookComposer({
 
 const getStyles = (theme: any) => StyleSheet.create({
   wrapper: {
-    marginVertical: spacing.sm,
+    marginTop: 0,
+    marginBottom: spacing.sm,
     borderWidth: 1,
     borderRadius: 20,
     padding: spacing.sm,

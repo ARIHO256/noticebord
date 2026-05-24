@@ -91,7 +91,7 @@ export default function HeaderBar({
       </View>
     </View>
         <TouchableOpacity
-          onPress={onSearchPress || (() => navigation.navigate('SearchTab'))}
+          onPress={onSearchPress || (() => navigation.navigate('Home'))}
           style={[
             styles.heroSearch,
             {
@@ -172,8 +172,8 @@ const styles = StyleSheet.create({
   heroContainer: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
     shadowOpacity: 0.06,
     shadowOffset: { width: 0, height: 3 },
     shadowRadius: 6,

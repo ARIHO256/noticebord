@@ -15,6 +15,7 @@ ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
 ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS if h.strip()]
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -22,6 +23,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.postgres",
     "django.contrib.staticfiles",
+    "channels",
     "corsheaders",
     "rest_framework",
     "django_filters",
@@ -155,6 +157,20 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "send-due-notice-reminders-every-minute": {
+        "task": "notices.tasks.send_due_notice_reminders",
+        "schedule": 60.0,
+    },
+    "cleanup-old-notifications-daily": {
+        "task": "notifications.tasks.cleanup_old_notifications",
+        "schedule": 86400.0,
+    },
+    "cleanup-expired-data-exports-daily": {
+        "task": "audit.tasks.cleanup_expired_exports",
+        "schedule": 86400.0,
+    },
+}
 
 # Channels settings (for WebSockets)
 CHANNEL_LAYERS = {

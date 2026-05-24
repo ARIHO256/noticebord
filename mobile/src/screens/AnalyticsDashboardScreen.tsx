@@ -84,7 +84,7 @@ export default function AnalyticsDashboardScreen({ navigation }: any) {
   const StatCard = ({ icon, label, value, color }: { icon: string; label: string; value: number | string; color?: string }) => (
     <Card style={{ flex: 1, minWidth: '45%', marginBottom: spacing.md }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm }}>
-        <MaterialCommunityIcons name={icon as keyof typeof MaterialCommunityIcons.glyphMap} size={24} color={color || theme.colors.primary} />
+        <MaterialCommunityIcons name={icon as any} size={24} color={color || theme.colors.primary} />
         <Text style={{ color: theme.colors.muted, fontSize: 12, marginLeft: spacing.xs }}>{label}</Text>
       </View>
       <Text style={{ color: theme.colors.text, fontSize: 24, fontWeight: '700' }}>{value}</Text>

@@ -356,7 +356,7 @@ export default function AdminUserCreateScreen() {
                   render={({ field: { value, onChange } }) => (
                     <OptionPicker
                       label="School *"
-                      value={value}
+                      value={value || ''}
                       options={SCHOOLS}
                       onChange={(val) => {
                         onChange(val);
@@ -374,10 +374,10 @@ export default function AdminUserCreateScreen() {
                   control={control}
                   name="department"
                   render={({ field: { value, onChange } }) => (
-                    <OptionPicker
-                      label="Department *"
-                      value={value}
-                      options={availableDepartments}
+                        <OptionPicker
+                          label="Department *"
+                          value={value || ''}
+                          options={availableDepartments}
                       onChange={(val) => {
                         onChange(val);
                         setValue('department', val, { shouldValidate: true });

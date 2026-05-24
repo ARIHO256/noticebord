@@ -8,6 +8,9 @@ export type FriendProfile = {
   username: string;
   first_name?: string;
   last_name?: string;
+  department?: string;
+  designation?: string;
+  school?: string;
   avatar_url?: string | null;
   friend_status?: FriendStatus;
   friend_request_id?: number | null;

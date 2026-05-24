@@ -30,6 +30,14 @@ CSRF_COOKIE_SECURE = False
 # Celery - run tasks synchronously in local dev
 CELERY_TASK_ALWAYS_EAGER = True
 
+# Disable throttling in local development to prevent 429 errors during active testing.
+# REST_FRAMEWORK is imported from base.py via settings/__init__.py; we mutate it here
+# instead of replacing it, to preserve pagination, auth, and other DRF settings.
+from .base import REST_FRAMEWORK
+
+REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {}
+
 # Logging to console only in dev
 LOGGING = {
     "version": 1,

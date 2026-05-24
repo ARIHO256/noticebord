@@ -41,7 +41,7 @@ export default function EmptyState({
         ]}
       >
         <MaterialCommunityIcons
-          name={icon as keyof typeof MaterialCommunityIcons.glyphMap}
+          name={icon as any}
           size={iconSize}
           color={theme.colors.primary}
         />

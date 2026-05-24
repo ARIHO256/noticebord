@@ -15,7 +15,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "noticeboard.settings")
 
 from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
-from channels.auth import AuthMiddlewareStack
+from noticeboard.ws_auth import JWTAuthMiddlewareStack
 
 django_asgi_app = get_asgi_application()
 
@@ -23,7 +23,7 @@ from notifications import routing as notifications_routing  # noqa
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
-    "websocket": AuthMiddlewareStack(
+    "websocket": JWTAuthMiddlewareStack(
         URLRouter(
             notifications_routing.websocket_urlpatterns
         )

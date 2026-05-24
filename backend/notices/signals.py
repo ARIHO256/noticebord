@@ -1,44 +1,19 @@
-from django.db.models.signals import post_save, post_delete
+from django.db.models.signals import post_save
 from django.dispatch import receiver
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
-from .models import Notice, Comment, Like, Favorite, Report
+from .models import Notice, Comment, Like, Report
 from notifications.signals import create_notification
 from audit.middleware import log_action
 
 
 @receiver(post_save, sender=Notice)
 def notify_new_notice(sender, instance, created, **kwargs):
-    """Notify followers when a new notice is posted."""
-    if not created:
-        return
-    
-    from users.models import User
-    
-    # Determine notification type
-    is_official = instance.category in ["education", "business"] or instance.priority in ["urgent", "important"]
-    notif_type = "official_notice" if is_official else "notice"
-    
-    # Get users who follow this department
-    followers = User.objects.filter(
-        followed_departments__contains=[instance.department],
-        is_active=True,
-    ).exclude(id=instance.created_by_id)
-    
-    for follower in followers:
-        create_notification(
-            user=follower,
-            notification_type=notif_type,
-            title=f"New notice in {instance.department}",
-            message=instance.title[:200],
-            sender=instance.created_by,
-            data={
-                "notice_id": str(instance.id),
-                "department": instance.department,
-                "category": instance.category,
-                "priority": instance.priority,
-            },
-        )
+    """
+    Delivery for new notices is handled by notices.services.deliver_notice_notifications()
+    in NoticeViewSet.perform_create to respect scheduling rules.
+    """
+    return
 
 
 @receiver(post_save, sender=Comment)
@@ -100,7 +75,7 @@ def notify_report(sender, instance, created, **kwargs):
             notification_type="report",
             title=f"Notice reported: {instance.notice.title[:50]}...",
             message=f"Reason: {instance.reason}",
-            sender=instance.reported_by,
+            sender=instance.user,
             data={
                 "notice_id": str(instance.notice.id),
                 "report_id": str(instance.id),

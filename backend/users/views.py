@@ -10,12 +10,15 @@ from rest_framework.views import APIView
 
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import DeviceToken, FriendRequest, Friendship, User
+from .models import DeviceToken, FriendRequest, Friendship, User, UserBlock, UserMute
 from .serializers import (
     DeviceTokenSerializer,
     EmailTokenObtainPairSerializer,
     FriendRequestSerializer,
+    PublicUserSerializer,
     RegisterSerializer,
+    UserBlockSerializer,
+    UserMuteSerializer,
     UserSerializer,
 )
 from .authentication import AllowInactiveUserJWTAuthentication
@@ -36,6 +39,22 @@ class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
     search_fields = ["username", "first_name", "last_name", "department", "school", "course"]
+
+    def get_queryset(self):
+        qs = User.objects.all().order_by("id")
+        user = getattr(self.request, "user", None)
+        if not user or not getattr(user, "is_authenticated", False):
+            return qs.none()
+        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+            return qs
+        blocked_by_me = UserBlock.objects.filter(blocker=user).values_list("blocked_id", flat=True)
+        blocked_me = UserBlock.objects.filter(blocked=user).values_list("blocker_id", flat=True)
+        return qs.exclude(id__in=blocked_by_me).exclude(id__in=blocked_me)
+
+    def get_serializer_class(self):
+        if self.action in {"list", "faculty", "students", "public"}:
+            return PublicUserSerializer
+        return UserSerializer
 
     @action(
         detail=False,
@@ -87,7 +106,7 @@ class UserViewSet(viewsets.ModelViewSet):
         Return a read-only view of another user's profile for authenticated viewers.
         """
         user = get_object_or_404(User, pk=pk)
-        serializer = UserSerializer(user, context={"request": request})
+        serializer = PublicUserSerializer(user, context={"request": request})
         return Response(serializer.data)
 
     @action(detail=False, methods=["get", "put"], permission_classes=[permissions.IsAuthenticated], url_path="preferences")
@@ -155,6 +174,57 @@ class UserViewSet(viewsets.ModelViewSet):
             user.followed_departments.remove(department)
             user.save()
         return Response({"status": "unfollowed", "followed_departments": user.followed_departments})
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated], url_path="block")
+    def block_user(self, request, pk=None):
+        target = get_object_or_404(User, pk=pk)
+        if target.id == request.user.id:
+            return Response({"detail": "You cannot block yourself."}, status=status.HTTP_400_BAD_REQUEST)
+
+        block, created = UserBlock.objects.get_or_create(blocker=request.user, blocked=target)
+        Friendship.remove_between(request.user, target)
+        FriendRequest.objects.filter(
+            models.Q(sender=request.user, receiver=target)
+            | models.Q(sender=target, receiver=request.user)
+        ).delete()
+
+        payload = UserBlockSerializer(block, context={"request": request}).data
+        payload["status"] = "blocked" if created else "already_blocked"
+        return Response(payload, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated], url_path="unblock")
+    def unblock_user(self, request, pk=None):
+        target = get_object_or_404(User, pk=pk)
+        deleted, _ = UserBlock.objects.filter(blocker=request.user, blocked=target).delete()
+        return Response({"status": "unblocked" if deleted else "not_blocked"})
+
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated], url_path="blocked")
+    def blocked(self, request):
+        blocks = UserBlock.objects.filter(blocker=request.user).select_related("blocked")
+        serializer = UserBlockSerializer(blocks, many=True, context={"request": request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated], url_path="mute")
+    def mute_user(self, request, pk=None):
+        target = get_object_or_404(User, pk=pk)
+        if target.id == request.user.id:
+            return Response({"detail": "You cannot mute yourself."}, status=status.HTTP_400_BAD_REQUEST)
+        mute, created = UserMute.objects.get_or_create(muter=request.user, muted=target)
+        payload = UserMuteSerializer(mute, context={"request": request}).data
+        payload["status"] = "muted" if created else "already_muted"
+        return Response(payload, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated], url_path="unmute")
+    def unmute_user(self, request, pk=None):
+        target = get_object_or_404(User, pk=pk)
+        deleted, _ = UserMute.objects.filter(muter=request.user, muted=target).delete()
+        return Response({"status": "unmuted" if deleted else "not_muted"})
+
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated], url_path="muted")
+    def muted(self, request):
+        mutes = UserMute.objects.filter(muter=request.user).select_related("muted")
+        serializer = UserMuteSerializer(mutes, many=True, context={"request": request})
+        return Response(serializer.data)
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated], url_path="suspend")
     def suspend(self, request, pk=None):

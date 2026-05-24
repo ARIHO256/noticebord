@@ -48,8 +48,9 @@ export type ConversationMessage = {
 };
 
 export const fetchConversations = async (): Promise<Conversation[]> => {
-  const response = await api.get<Conversation[]>('/messages/conversations/');
-  return Array.isArray(response.data) ? response.data : response.data.results || [];
+  const response = await api.get('/messages/conversations/');
+  const payload: any = response.data;
+  return Array.isArray(payload) ? payload : payload?.results || [];
 };
 
 export const openConversation = async (payload: {

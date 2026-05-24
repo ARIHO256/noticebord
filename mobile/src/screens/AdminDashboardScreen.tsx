@@ -24,6 +24,9 @@ export default function AdminDashboardScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const rootNavigation = navigation.getParent?.() ?? navigation;
+  const goTo = (screen: keyof RootStackParamList, params?: any) => {
+    (rootNavigation as any).navigate(screen, params);
+  };
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalStudents: 0,
@@ -213,14 +216,14 @@ export default function AdminDashboardScreen() {
               icon="account-group"
               title="Manage Users"
               description="View, edit, and manage all users in the system"
-              onPress={() => rootNavigation.navigate('AdminUserList')}
+              onPress={() => goTo('AdminUserList')}
               color={theme.colors.primary}
             />
             <AdminActionCard
               icon="account-plus"
               title="Create New User"
               description="Add a new student, staff, or faculty member"
-              onPress={() => rootNavigation.navigate('AdminUserCreate')}
+              onPress={() => goTo('AdminUserCreate')}
               color="#10B981"
             />
           </View>
@@ -234,7 +237,7 @@ export default function AdminDashboardScreen() {
               icon="alert-circle"
               title="View Violations"
               description="Review content violations and suspended users"
-              onPress={() => rootNavigation.navigate('Violations')}
+              onPress={() => goTo('Violations')}
               color="#DC2626"
             />
           </View>
@@ -248,28 +251,28 @@ export default function AdminDashboardScreen() {
               icon="account-search"
               title="View All Students"
               description="Browse and search all student accounts"
-              onPress={() => rootNavigation.navigate('StudentList')}
+              onPress={() => goTo('StudentList')}
               color="#3B82F6"
             />
             <AdminActionCard
               icon="account-tie"
               title="View All Faculty"
               description="Browse and search all faculty members"
-              onPress={() => rootNavigation.navigate('FacultyList')}
+              onPress={() => goTo('FacultyList')}
               color="#8B5CF6"
             />
             <AdminActionCard
               icon="account-cancel"
               title="Suspend / Unsuspend"
               description="Suspend or reinstate students and staff"
-              onPress={() => rootNavigation.navigate('AdminUserList', { filter: 'all' })}
+              onPress={() => goTo('AdminUserList', { filter: 'all' })}
               color="#DC2626"
             />
             <AdminActionCard
               icon="message-text"
               title="Message Any User"
               description="Open a direct conversation with any member"
-              onPress={() => rootNavigation.navigate('AdminUserList', { quickAction: 'message' })}
+              onPress={() => goTo('AdminUserList', { quickAction: 'message' })}
               color={theme.colors.primary}
             />
           </View>

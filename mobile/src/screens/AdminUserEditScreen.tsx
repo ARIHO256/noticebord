@@ -208,7 +208,6 @@ export default function AdminUserEditScreen({ route, navigation }: Props) {
               onPress={handleMessage}
               style={{ flex: 1 }}
               disabled={actionLoading}
-              leftIcon={<MaterialCommunityIcons name="message-text" size={18} color="#fff" />}
             />
             {isSuspended ? (
               <PrimaryButton
@@ -216,7 +215,6 @@ export default function AdminUserEditScreen({ route, navigation }: Props) {
                 onPress={handleUnsuspend}
                 style={{ flex: 1 }}
                 disabled={actionLoading}
-                leftIcon={<MaterialCommunityIcons name="account-check" size={18} color="#fff" />}
               />
             ) : (
               <PrimaryButton
@@ -224,8 +222,6 @@ export default function AdminUserEditScreen({ route, navigation }: Props) {
                 onPress={handleSuspend}
                 style={{ flex: 1 }}
                 disabled={actionLoading}
-                variant="danger"
-                leftIcon={<MaterialCommunityIcons name="account-lock" size={18} color="#fff" />}
               />
             )}
           </View>
@@ -233,8 +229,6 @@ export default function AdminUserEditScreen({ route, navigation }: Props) {
             title="Delete account"
             onPress={handleDelete}
             disabled={actionLoading}
-            variant="danger"
-            leftIcon={<MaterialCommunityIcons name="delete" size={18} color="#fff" />}
           />
         </Card>
 

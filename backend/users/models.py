@@ -166,6 +166,53 @@ class FriendRequest(models.Model):
         ).first()
 
 
+class UserBlock(models.Model):
+    blocker = models.ForeignKey(User, related_name="blocks_initiated", on_delete=models.CASCADE)
+    blocked = models.ForeignKey(User, related_name="blocks_received", on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("blocker", "blocked")
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["blocker", "blocked"]),
+            models.Index(fields=["blocked"]),
+        ]
+
+    def clean(self):
+        if self.blocker_id and self.blocked_id and self.blocker_id == self.blocked_id:
+            raise ValidationError("You cannot block yourself.")
+
+    @classmethod
+    def is_blocked_between(cls, user_one, user_two) -> bool:
+        if not user_one or not user_two:
+            return False
+        if user_one.id == user_two.id:
+            return False
+        return cls.objects.filter(
+            models.Q(blocker=user_one, blocked=user_two)
+            | models.Q(blocker=user_two, blocked=user_one)
+        ).exists()
+
+
+class UserMute(models.Model):
+    muter = models.ForeignKey(User, related_name="mutes_initiated", on_delete=models.CASCADE)
+    muted = models.ForeignKey(User, related_name="mutes_received", on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("muter", "muted")
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["muter", "muted"]),
+            models.Index(fields=["muted"]),
+        ]
+
+    def clean(self):
+        if self.muter_id and self.muted_id and self.muter_id == self.muted_id:
+            raise ValidationError("You cannot mute yourself.")
+
+
 class SuspensionAppeal(models.Model):
     """Store appeals from suspended users"""
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='suspension_appeals')

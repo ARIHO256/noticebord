@@ -191,7 +191,6 @@ export default function FacebookPostCard({
       // Single image - Full width, no rounded corners (Facebook style)
       return (
         <TouchableOpacity
-          activeOpacity={0.95}
           onPress={() => {
             setPreviewIndex(0);
             setPreviewVisible(true);

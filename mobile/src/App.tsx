@@ -97,13 +97,13 @@ function Router() {
   // Invisible background refresh (X-style): quietly refetch key data without showing spinners
   useEffect(() => {
     if (!token) return;
-    const REALTIME_INTERVAL_MS = 5000; // 5 seconds - more reasonable interval
+    const REALTIME_INTERVAL_MS = 30000; // 30 seconds - gentle background refresh
     const interval = setInterval(() => {
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      // Stagger invalidations to avoid request storms
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      queryClient.invalidateQueries({ queryKey: ['notices'] });
-      queryClient.invalidateQueries({ queryKey: ['official-notices'] });
-      queryClient.invalidateQueries({ queryKey: ['friend-requests'] });
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['conversations'] }), 2000);
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['friend-requests'] }), 4000);
+      // Notices are already polled by HomeScreen; don't duplicate here
     }, REALTIME_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [queryClient, token]);
@@ -243,7 +243,7 @@ function Router() {
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}>
-                  <MaterialCommunityIcons name={name as keyof typeof MaterialCommunityIcons.glyphMap} color={color} size={iconSize} />
+                  <MaterialCommunityIcons name={name as any} color={color} size={iconSize} />
                 </View>
                 {badge && (
                   <View style={{
