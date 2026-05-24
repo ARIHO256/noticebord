@@ -23,7 +23,7 @@ import { api } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
 import HeaderBar from '../components/HeaderBar';
 import OfflineBanner from '../components/OfflineBanner';
-import FacebookPostCard from '../components/FacebookPostCard';
+import NoticeCard from '../components/NoticeCard';
 import FacebookComposer from '../components/FacebookComposer';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
@@ -57,6 +57,7 @@ type Notice = {
   created_by_avatar?: string | null;
   created_by_friend_status?: string;
   created_by_friend_request_id?: number | null;
+  created_by_designation?: string;
   created_at: string;
   department?: string;
   views_count?: number;
@@ -121,7 +122,7 @@ export default function HomeScreen({ navigation, route }: Props) {
   const badges = useTabBadges();
   const [globalPreview, setGlobalPreview] = useState<NoticeAttachment | null>(null);
   const isOnline = net.isConnected !== false;
-  const noticeRefetchInterval = isOnline ? 500 : false;
+  const noticeRefetchInterval = isOnline ? 5000 : false;
   const officialRefetchInterval = isOnline ? 500 : false;
   const navigateTo = useCallback(
     <K extends keyof RootStackParamList>(route: K, params?: RootStackParamList[K]) => {
@@ -233,7 +234,7 @@ export default function HomeScreen({ navigation, route }: Props) {
     queryKey: ['notices', viewMode, section, query, selectedDepartments.join(','), searchPriority],
     queryFn: fetchPage,
     getNextPageParam: (lastPage: { results: Notice[]; nextPage?: number }) => lastPage.nextPage,
-    enabled: isOnline && !isOfficialMode, // Disable for official mode since we use officialNoticesQuery
+    enabled: isOnline && viewMode !== 'official', // Disable for official mode since we use officialNoticesQuery
     initialPageParam: 1,
     refetchInterval: noticeRefetchInterval,
     refetchIntervalInBackground: true,
@@ -386,45 +387,29 @@ export default function HomeScreen({ navigation, route }: Props) {
 
   const renderNotice = useCallback(
     ({ item }: { item: Notice }) => {
-      const createdAtLabel = new Date(item.created_at).toLocaleString();
-      const handleLikeToggle = async () => {
-        try {
-          if (item.is_liked) {
-            await api.post(`/notices/${item.id}/unlike/`);
-          } else {
-            await api.post(`/notices/${item.id}/like/`);
-          }
-          refetch();
-        } catch (error: any) {
-          showError(error?.userMessage || 'Failed to update like. Please try again.');
-        }
-      };
-      const handleFavoriteToggle = async () => {
-        try {
-          if (item.is_favorited) {
-            await api.post(`/notices/${item.id}/unfavorite/`);
-          } else {
-            await api.post(`/notices/${item.id}/favorite/`);
-          }
-          if (viewMode === 'favorites') refetch();
-        } catch (error: any) {
-          showError(error?.userMessage || 'Failed to update favorite. Please try again.');
-        }
-      };
       const goToDetail = () => navigateTo('NoticeDetail', { id: item.id });
       return (
-        <FacebookPostCard
-          {...item}
-          created_at={createdAtLabel}
-          onPress={goToDetail}
-          onCommentPress={goToDetail}
-          onLikeToggle={handleLikeToggle}
-          onFavoriteToggle={handleFavoriteToggle}
-          onAuthorPress={() => openAuthorProfile(item)}
+        <NoticeCard
+          notice={{
+            ...item,
+            created_at: item.created_at,
+            attachments: item.attachments?.map((a) => ({
+              id: a.id,
+              url: a.file || a.url || '',
+              file_type: (a.file_type || 'image') as 'image' | 'video' | 'audio' | 'document',
+              original_name: a.original_name,
+            })),
+          }}
+          onLike={() => {
+            api.post(`/notices/${item.id}/${item.is_liked ? 'unlike' : 'like'}/`).then(() => refetch());
+          }}
+          onComment={goToDetail}
+          onShare={() => {}}
+          compact
         />
       );
     },
-    [navigateTo, openAuthorProfile, refetch, viewMode],
+    [navigateTo, refetch],
   );
 
   const renderOfficialNotices = useMemo(() => {

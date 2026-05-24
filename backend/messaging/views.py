@@ -11,6 +11,7 @@ from .serializers import (
     ConversationSerializer,
     MessageCreateSerializer,
 )
+from users.throttling import MessageRateThrottle
 
 
 class ConversationViewSet(viewsets.ModelViewSet):
@@ -45,7 +46,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
-    @action(detail=True, methods=["get", "post"], url_path="messages")
+    @action(detail=True, methods=["get", "post"], url_path="messages", throttle_classes=[MessageRateThrottle])
     def messages(self, request, pk=None):
         from moderation.views import check_text_content
         import logging
@@ -84,4 +85,45 @@ class ConversationViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         message = serializer.save()
         output = ConversationMessageSerializer(message, context=self.get_serializer_context())
+        
+        # Broadcast via WebSocket
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f"conversation_{conversation.id}",
+                {
+                    "type": "chat_message",
+                    "message": output.data,
+                }
+            )
+        
+        # Create notification for recipient
+        from notifications.signals import create_notification
+        recipient = conversation.user_b if conversation.user_a == request.user else conversation.user_a
+        create_notification(
+            user=recipient,
+            notification_type="message",
+            title=f"New message from {request.user.get_full_name() or request.user.username}",
+            message=message.content[:200] if message.content else "Attachment",
+            sender=request.user,
+            data={
+                "conversation_id": str(conversation.id),
+                "message_id": str(message.id),
+            },
+        )
+        
         return Response(output.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="mark-as-read")
+    def mark_as_read(self, request, pk=None):
+        """Mark all unread messages in a conversation as read."""
+        conversation = self.get_object()
+        unread = conversation.messages.filter(
+            read_at__isnull=True
+        ).exclude(sender=request.user)
+        count = unread.count()
+        unread.update(read_at=timezone.now())
+        return Response({"status": "marked_as_read", "count": count})

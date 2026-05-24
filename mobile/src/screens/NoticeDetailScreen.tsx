@@ -45,6 +45,7 @@ type NoticeAttachment = {
 
 type NoticeComment = {
   id: number;
+  user?: number;
   username: string;
   user_full_name?: string | null;
   user_avatar?: string | null;
@@ -134,8 +135,6 @@ type NoticeDetail = {
   created_by_avatar?: string | null;
   created_by_friend_status?: FriendStatus;
   created_by_friend_request_id?: number | null;
-  created_by_friend_status?: FriendStatus;
-  created_by_friend_request_id?: number | null;
   created_at: string;
   updated_at: string;
   is_active: boolean;
@@ -172,6 +171,10 @@ export default function NoticeDetailScreen({ route, navigation }: Props) {
   const [authorFriendRequestId, setAuthorFriendRequestId] = useState<number | null>(null);
   const [messageLoading, setMessageLoading] = useState(false);
   const [authorProfile, setAuthorProfile] = useState<{ is_active?: boolean } | null>(null);
+
+  // Derived values (must be before any hooks that reference them)
+  const isOwner = useMemo(() => !!(me && item && me.id === item.created_by), [me, item]);
+  const isAdminOrStaff = useMemo(() => !!(me && (me.is_staff || me.is_superuser)), [me]);
 
   const load = useCallback(
     async (isRefresh = false) => {
@@ -597,7 +600,7 @@ export default function NoticeDetailScreen({ route, navigation }: Props) {
           <TouchableOpacity
             onPress={() =>
               navigation.navigate('UserProfile', {
-                userId: comment.id,
+                userId: comment.user ?? comment.id,
                 name: displayName,
               })
             }
@@ -621,14 +624,13 @@ export default function NoticeDetailScreen({ route, navigation }: Props) {
               <TouchableOpacity
                 onPress={() =>
                   navigation.navigate('UserProfile', {
-                    userId: comment.id,
+                    userId: comment.user ?? comment.id,
                     name: displayName,
                   })
                 }
                 style={styles.commentNameRow}
               >
                 <Text style={[styles.twitterCommentName, { color: theme.colors.text }]}>{displayName}</Text>
-                <MaterialCommunityIcons name="check-circle" size={14} color={theme.colors.primary} style={{ marginLeft: 4 }} />
                 <Text style={[styles.twitterCommentHandle, { color: theme.colors.muted }]}>@{handle}</Text>
                 <Text style={[styles.twitterCommentTime, { color: theme.colors.muted }]}>· {timestamp}</Text>
               </TouchableOpacity>
@@ -727,8 +729,6 @@ export default function NoticeDetailScreen({ route, navigation }: Props) {
     );
   };
 
-  const isOwner = !!(me && item && me.id === item.created_by);
-  const isAdminOrStaff = !!(me && (me.is_staff || me.is_superuser));
   const attachments = item?.attachments || [];
   const hasAttachments = attachments.length > 0;
   const extraAttachments = attachments.length > 1 ? attachments.slice(1) : [];
@@ -827,7 +827,6 @@ export default function NoticeDetailScreen({ route, navigation }: Props) {
                 <Text style={[styles.authorName, { color: theme.colors.text }]}>
                   {item.created_by_full_name || item.created_by_username}
                 </Text>
-                <MaterialCommunityIcons name="check-circle" size={16} color={theme.colors.primary} style={{ marginLeft: 4 }} />
                 <Text style={[styles.authorHandle, { color: theme.colors.muted }]}>
                   @{item.created_by_username}
                 </Text>
@@ -836,6 +835,9 @@ export default function NoticeDetailScreen({ route, navigation }: Props) {
           </TouchableOpacity>
 
           {/* Post Content */}
+          {item.title ? (
+            <Text style={[styles.postTitle, { color: theme.colors.text }]}>{item.title}</Text>
+          ) : null}
           <Text style={[styles.postText, { color: theme.colors.text }]}>{item.description}</Text>
 
           {/* Post Timestamp and Views */}
@@ -854,7 +856,7 @@ export default function NoticeDetailScreen({ route, navigation }: Props) {
               <Text style={[styles.engagementNumber, { color: theme.colors.text }]}>
                 {item.comments_count ?? 0}
               </Text>
-              <Text style={[styles.engagementLabel, { color: theme.colors.muted }]}>Reposts</Text>
+              <Text style={[styles.engagementLabel, { color: theme.colors.muted }]}>Comments</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.engagementMetric}>
               <Text style={[styles.engagementNumber, { color: theme.colors.text }]}>
@@ -1259,10 +1261,17 @@ const makeStyles = (theme: typeof import('../theme').lightTheme) =>
       lineHeight: 22,
       color: theme.colors.text,
     },
+    postTitle: {
+      fontSize: 22,
+      fontWeight: '700',
+      lineHeight: 30,
+      marginTop: spacing.sm,
+      marginBottom: spacing.xs,
+    },
     postText: {
-      fontSize: 20,
-      lineHeight: 28,
-      marginTop: spacing.md,
+      fontSize: 16,
+      lineHeight: 24,
+      marginTop: spacing.xs,
       marginBottom: spacing.md,
     },
     postMetaRow: {

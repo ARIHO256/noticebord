@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { fetchConversations } from '../api/messages';
-import { fetchNotifications } from '../api/notifications';
+import { fetchUnreadCount } from '../api/notifications';
 
 export type TabBadges = {
   home: number | null;
   official: number | null;
   messages: number | null;
+  friends: number | null;
   notifications: number | null;
 };
 
@@ -15,13 +15,15 @@ export type TabBadges = {
  * Custom hook to manage badge counts for tab navigation
  * Fetches unread counts for:
  * - Messages (unread conversations)
- * - Notifications (unread friend requests and notices)
+ * - Notifications (unread in-app notifications)
+ * - Friends (pending friend requests)
  */
 export const useTabBadges = () => {
   const [badges, setBadges] = useState<TabBadges>({
     home: null,
     official: null,
     messages: null,
+    friends: null,
     notifications: null,
   });
 
@@ -29,30 +31,28 @@ export const useTabBadges = () => {
   const { data: conversations = [] } = useQuery({
     queryKey: ['conversations'],
     queryFn: fetchConversations,
-    refetchInterval: 30000, // Refetch every 30 seconds
+    refetchInterval: 30000,
   });
 
-  // Fetch notifications to get unread notification count
-  const { data: notifications = [] } = useQuery({
-    queryKey: ['notifications'],
-    queryFn: fetchNotifications,
-    refetchInterval: 30000, // Refetch every 30 seconds
+  // Fetch unread notification count
+  const { data: unreadCountData } = useQuery({
+    queryKey: ['notifications-unread-count'],
+    queryFn: fetchUnreadCount,
+    refetchInterval: 30000,
   });
 
   useEffect(() => {
     // Calculate unread message count
-    const unreadMessages = conversations.reduce((sum, conv) => sum + (conv.unread_count ?? 0), 0);
-
-    // Calculate unread notification count
-    const unreadNotifications = notifications.filter((notif) => !notif.read).length;
+    const unreadMessages = conversations.reduce((sum: number, conv: any) => sum + (conv.unread_count ?? 0), 0);
 
     setBadges({
-      home: null, // Home has no badges for now
-      official: null, // Official notices don't need unread badge (they're always fresh)
+      home: null,
+      official: null,
       messages: unreadMessages > 0 ? unreadMessages : null,
-      notifications: unreadNotifications > 0 ? unreadNotifications : null,
+      friends: null, // Set by FriendsScreen
+      notifications: unreadCountData?.unread_count ?? null,
     });
-  }, [conversations, notifications]);
+  }, [conversations, unreadCountData]);
 
   return badges;
 };

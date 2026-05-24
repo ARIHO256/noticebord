@@ -1,4 +1,5 @@
 from django.db.models import Count, Q
+from django.utils import timezone
 from rest_framework import generics, status, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -41,13 +42,13 @@ class NotificationMarkReadView(APIView):
                 id__in=notification_ids,
                 user=request.user,
                 is_read=False,
-            ).update(is_read=True, read_at=__import__("django.utils.timezone").now())
+            ).update(is_read=True, read_at=timezone.now())
         else:
             # Mark all as read
             Notification.objects.filter(
                 user=request.user,
                 is_read=False,
-            ).update(is_read=True, read_at=__import__("django.utils.timezone").now())
+            ).update(is_read=True, read_at=timezone.now())
         
         return Response({"status": "marked_as_read"})
 

@@ -65,7 +65,7 @@ const notifySuspended = (info?: { reason?: string | null }) => {
 };
 
 export const api = axios.create({
-  baseURL: `${API_BASE_URL}/api`,
+  baseURL: `${API_BASE_URL}/api/v1`,
   headers: {
     Accept: 'application/json',
   },

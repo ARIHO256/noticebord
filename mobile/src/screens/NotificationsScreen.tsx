@@ -1,25 +1,28 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useContext } from 'react';
 import {
   View,
   Text,
   FlatList,
   StyleSheet,
   TouchableOpacity,
-  Image,
   RefreshControl,
   ActivityIndicator,
-  Alert,
   useWindowDimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useTheme } from '../context/ThemeContext';
 import { spacing } from '../theme';
-import { fetchNotifications, type Notification } from '../api/notifications';
-import { acceptFriendRequest, declineFriendRequest } from '../api/friends';
+import {
+  fetchNotifications,
+  markNotificationsAsRead,
+  deleteNotifications,
+  type NotificationItem,
+} from '../api/notifications';
 import { useToast } from '../context/ToastContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import type { RootStackParamList } from '../App';
+import { AuthContext } from '../context/AuthContext';
+import { useNotificationsWebSocket } from '../hooks/useWebSocket';
 
 export default function NotificationsScreen() {
   const { theme } = useTheme();
@@ -27,38 +30,52 @@ export default function NotificationsScreen() {
   const { showSuccess, showError } = useToast();
   const navigation = useNavigation<any>();
   const queryClient = useQueryClient();
+  const { token } = useContext(AuthContext);
   const [refreshing, setRefreshing] = useState(false);
-  const markAsRead = useCallback(
-    (notificationId: number) => {
-      queryClient.setQueryData<Notification[] | undefined>(['notifications'], (prev) =>
-        prev ? prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n)) : prev,
-      );
-    },
-    [queryClient],
-  );
 
-  const markAllAsRead = useCallback(() => {
-    queryClient.setQueryData<Notification[] | undefined>(['notifications'], (prev) =>
-      prev ? prev.map((n) => ({ ...n, read: true })) : [],
-    );
-  }, [queryClient]);
+  // WebSocket for real-time notifications
+  const { unreadCount: wsUnreadCount } = useNotificationsWebSocket(token);
 
   const {
-    data: notifications = [],
+    data: notificationsData,
     isLoading,
     refetch,
   } = useQuery({
     queryKey: ['notifications'],
-    queryFn: fetchNotifications,
-    refetchInterval: 30000, // Refetch every 30 seconds
+    queryFn: () => fetchNotifications(),
+    refetchInterval: 30000,
+  });
+
+  const notifications = notificationsData?.results || [];
+
+  const markReadMutation = useMutation({
+    mutationFn: markNotificationsAsRead,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteNotifications,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      showSuccess('Notifications deleted');
+    },
+    onError: (error: any) => {
+      showError(error?.userMessage || 'Failed to delete notifications');
+    },
   });
 
   useFocusEffect(
     useCallback(() => {
       if (notifications.length > 0) {
-        markAllAsRead();
+        const unreadIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
+        if (unreadIds.length > 0) {
+          markReadMutation.mutate(unreadIds);
+        }
       }
-    }, [markAllAsRead, notifications.length]),
+    }, [notifications.length]),
   );
 
   const onRefresh = useCallback(async () => {
@@ -67,66 +84,34 @@ export default function NotificationsScreen() {
     setRefreshing(false);
   }, [refetch]);
 
-  const handleAcceptFriendRequest = useCallback(
-    async (notification: Notification) => {
-      if (!notification.friend_request) return;
-      try {
-        await acceptFriendRequest(notification.friend_request.id);
-        showSuccess('Friend request accepted');
-        // Invalidate notifications query to update badge
-        queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      } catch (error: any) {
-        showError(error?.userMessage || 'Failed to accept friend request');
-      }
-    },
-    [queryClient, showSuccess, showError],
-  );
+  const handleMarkAllRead = useCallback(() => {
+    markReadMutation.mutate(undefined);
+  }, [markReadMutation]);
 
-  const handleDeclineFriendRequest = useCallback(
-    async (notification: Notification) => {
-      if (!notification.friend_request) return;
-      try {
-        await declineFriendRequest(notification.friend_request.id);
-        showSuccess('Friend request declined');
-        // Invalidate notifications query to update badge
-        queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      } catch (error: any) {
-        showError(error?.userMessage || 'Failed to decline friend request');
-      }
-    },
-    [queryClient, showSuccess, showError],
-  );
+  const handleDeleteAllRead = useCallback(() => {
+    deleteMutation.mutate(undefined);
+  }, [deleteMutation]);
 
   const handleNotificationPress = useCallback(
-    (notification: Notification) => {
-      markAsRead(notification.id);
-      if (notification.type === 'friend_request') {
-        // Navigate to user profile
-        if (notification.friend_request?.sender) {
-          navigation.navigate('UserProfile', {
-            userId: notification.friend_request.sender.id,
-            name: notification.friend_request.sender.first_name || notification.friend_request.sender.username,
-          });
-        }
-      } else if (notification.type === 'suspended_post') {
-        // For suspended posts: allow navigation if notice_id exists
-        // Backend will handle permissions (admin/staff can view, owners can view their own)
-        if (notification.notice_id) {
-          navigation.navigate('NoticeDetail', { id: notification.notice_id });
-        } else {
-          // Fallback: show alert if no notice_id
-          Alert.alert(
-            notification.title || 'Post Suspended',
-            notification.message || 'Your post has been suspended due to a violation of community guidelines.',
-            [{ text: 'OK' }]
-          );
-        }
-      } else if (notification.type === 'notice' && notification.notice_id) {
-        // Navigate to notice detail for regular notices
-        navigation.navigate('NoticeDetail', { id: notification.notice_id });
+    (notification: NotificationItem) => {
+      if (!notification.is_read) {
+        markReadMutation.mutate([notification.id]);
+      }
+
+      const { notice_id, conversation_id } = notification.data || {};
+
+      if (notification.notification_type === 'message' && conversation_id) {
+        navigation.navigate('Conversation', { conversationId: conversation_id });
+      } else if (
+        ['notice', 'official_notice', 'comment', 'comment_reply', 'like'].includes(
+          notification.notification_type,
+        ) &&
+        notice_id
+      ) {
+        navigation.navigate('NoticeDetail', { id: notice_id });
       }
     },
-    [markAsRead, navigation],
+    [markReadMutation, navigation],
   );
 
   const formatTime = (dateString: string) => {
@@ -144,109 +129,100 @@ export default function NotificationsScreen() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  const getNotificationIcon = (type: Notification['type']) => {
+  const getNotificationIcon = (type: string) => {
     switch (type) {
       case 'friend_request':
+      case 'friend_accepted':
         return 'account-plus';
+      case 'message':
+        return 'message-text';
       case 'notice':
+      case 'official_notice':
         return 'file-document';
-      case 'suspended_post':
-        return 'alert-circle';
       case 'comment':
+      case 'comment_reply':
         return 'comment';
       case 'like':
         return 'thumb-up';
-      default:
+      case 'mention':
+        return 'at';
+      case 'suspension':
+        return 'alert-circle';
+      case 'reminder':
         return 'bell';
+      default:
+        return 'bell-outline';
     }
   };
 
-  const renderNotification = ({ item }: { item: Notification }) => {
-    const isFriendRequest = item.type === 'friend_request';
-    const avatar = item.avatar || item.notice_author?.avatar_url;
+  const getIconColor = (type: string) => {
+    switch (type) {
+      case 'friend_request':
+      case 'friend_accepted':
+        return '#25D366';
+      case 'message':
+        return '#007AFF';
+      case 'notice':
+      case 'official_notice':
+        return '#FF9500';
+      case 'comment':
+      case 'comment_reply':
+        return '#5856D6';
+      case 'like':
+        return '#FF2D55';
+      case 'suspension':
+        return '#FF3B30';
+      default:
+        return '#8E8E93';
+    }
+  };
 
+  const renderNotification = ({ item }: { item: NotificationItem }) => {
     return (
-      <View>
-        <TouchableOpacity
-          style={[styles.notificationItem, { backgroundColor: theme.colors.card }]}
-          onPress={() => !isFriendRequest && handleNotificationPress(item)}
-          activeOpacity={0.7}
-        >
-          {/* Unread indicator */}
-          {!item.read && <View style={[styles.unreadDot, { backgroundColor: theme.colors.primary }]} />}
+      <TouchableOpacity
+        style={[
+          styles.notificationItem,
+          {
+            backgroundColor: theme.colors.card,
+            opacity: item.is_read ? 0.85 : 1,
+          },
+        ]}
+        onPress={() => handleNotificationPress(item)}
+        activeOpacity={0.7}
+      >
+        {!item.is_read && (
+          <View style={[styles.unreadDot, { backgroundColor: theme.colors.primary }]} />
+        )}
 
-          <View style={styles.notificationContent}>
-            {/* Avatar with Badge */}
-            <View style={styles.avatarContainer}>
-              {avatar ? (
-                <Image source={{ uri: avatar }} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatarPlaceholder, { backgroundColor: theme.colors.surface }]}>
-                  <Text style={[styles.avatarText, { color: theme.colors.text }]}>
-                    {(item.notice_author?.first_name || item.friend_request?.sender?.first_name || 'U')
-                      .slice(0, 1)
-                      .toUpperCase()}
-                  </Text>
-                </View>
-              )}
-              <View
-                style={[
-                  styles.iconBadge,
-                  {
-                    backgroundColor:
-                      item.type === 'friend_request'
-                        ? theme.colors.primary
-                        : item.type === 'suspended_post'
-                          ? (theme.colors.error || '#FF3B30')
-                          : item.type === 'notice'
-                            ? theme.colors.accent
-                            : theme.colors.success,
-                  },
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name={getNotificationIcon(item.type) as keyof typeof MaterialCommunityIcons.glyphMap}
-                  size={10}
-                  color="#FFFFFF"
-                />
-              </View>
-            </View>
-
-            {/* Content */}
-            <View style={styles.textContainer}>
-              <Text style={[styles.message, { color: theme.colors.text }]} numberOfLines={3}>
-                {item.message}
-              </Text>
-              {item.notice_title && (
-                <Text style={[styles.noticeTitle, { color: theme.colors.muted }]} numberOfLines={1}>
-                  {item.notice_title}
-                </Text>
-              )}
-              <Text style={[styles.time, { color: theme.colors.muted }]}>{formatTime(item.created_at)}</Text>
-
-              {/* Actions for friend requests - below content */}
-              {isFriendRequest && item.friend_request && (
-                <View style={styles.actions}>
-                  <TouchableOpacity
-                    style={[styles.acceptButton, { backgroundColor: theme.colors.primary }]}
-                    onPress={() => handleAcceptFriendRequest(item)}
-                  >
-                    <MaterialCommunityIcons name="check" size={16} color="#FFFFFF" />
-                    <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '600' }}>Accept</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.declineButton, { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }]}
-                    onPress={() => handleDeclineFriendRequest(item)}
-                  >
-                    <MaterialCommunityIcons name="close" size={16} color={theme.colors.text} />
-                    <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: '600' }}>Decline</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+        <View style={styles.notificationContent}>
+          <View style={styles.avatarContainer}>
+            <View
+              style={[
+                styles.avatarPlaceholder,
+                { backgroundColor: getIconColor(item.notification_type) + '20' },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={getNotificationIcon(item.notification_type) as any}
+                size={22}
+                color={getIconColor(item.notification_type)}
+              />
             </View>
           </View>
-        </TouchableOpacity>
-      </View>
+
+          <View style={styles.textContainer}>
+            <Text style={[styles.title, { color: theme.colors.text }]} numberOfLines={1}>
+              {item.title}
+            </Text>
+            <Text style={[styles.message, { color: theme.colors.muted }]} numberOfLines={2}>
+              {item.message}
+            </Text>
+            <Text style={[styles.time, { color: theme.colors.muted }]}>
+              {formatTime(item.created_at)}
+            </Text>
+          </View>
+        </View>
+      </TouchableOpacity>
     );
   };
 
@@ -263,10 +239,24 @@ export default function NotificationsScreen() {
 
   const renderHeader = () => (
     <View style={[styles.headerWrapper, { marginHorizontal: headerHorizontalMargin }]}>
-      <Text style={[styles.screenTitle, { color: theme.colors.text }]}>Notification</Text>
-      <Text style={[styles.screenSubtitle, { color: theme.colors.muted }]}>
-        Stay in the loop with campus news and requests
-      </Text>
+      <View style={styles.headerRow}>
+        <View>
+          <Text style={[styles.screenTitle, { color: theme.colors.text }]}>Notifications</Text>
+          <Text style={[styles.screenSubtitle, { color: theme.colors.muted }]}>
+            {wsUnreadCount > 0 ? `${wsUnreadCount} unread` : 'Stay in the loop with campus news'}
+          </Text>
+        </View>
+        {notifications.length > 0 && (
+          <View style={styles.headerActions}>
+            <TouchableOpacity onPress={handleMarkAllRead} style={styles.headerButton}>
+              <MaterialCommunityIcons name="check-all" size={20} color={theme.colors.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleDeleteAllRead} style={styles.headerButton}>
+              <MaterialCommunityIcons name="delete-sweep" size={20} color={theme.colors.error || '#FF3B30'} />
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
     </View>
   );
 
@@ -277,7 +267,9 @@ export default function NotificationsScreen() {
         keyExtractor={(item) => `notification-${item.id}`}
         renderItem={renderNotification}
         contentContainerStyle={styles.listContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
+        }
         scrollIndicatorInsets={{ right: 1 }}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={
@@ -285,7 +277,7 @@ export default function NotificationsScreen() {
             <MaterialCommunityIcons name="bell-off" size={64} color={theme.colors.muted} />
             <Text style={[styles.emptyText, { color: theme.colors.muted }]}>No notifications yet</Text>
             <Text style={[styles.emptySubtext, { color: theme.colors.muted }]}>
-              You'll see friend requests and notices here
+              You'll see notices, messages, and friend requests here
             </Text>
           </View>
         }
@@ -306,6 +298,20 @@ const styles = StyleSheet.create({
   headerWrapper: {
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  headerButton: {
+    padding: spacing.sm,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.05)',
   },
   screenTitle: {
     fontSize: 28,
@@ -341,11 +347,6 @@ const styles = StyleSheet.create({
     position: 'relative',
     flexShrink: 0,
   },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-  },
   avatarPlaceholder: {
     width: 44,
     height: 44,
@@ -353,38 +354,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  iconBadge: {
-    position: 'absolute',
-    bottom: -4,
-    right: -4,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
   textContainer: {
     flex: 1,
     minWidth: 0,
   },
+  title: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
   message: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: spacing.xs,
+    fontSize: 13,
+    fontWeight: '500',
     lineHeight: 18,
     flexWrap: 'wrap',
-  },
-  noticeTitle: {
-    fontSize: 12,
-    marginBottom: spacing.xs,
-    fontWeight: '500',
-    opacity: 0.85,
   },
   time: {
     fontSize: 11,
@@ -392,43 +375,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     opacity: 0.7,
   },
-  actions: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-  },
-  acceptButton: {
-    flex: 1,
-    minWidth: 60,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: spacing.xs,
-  },
-  declineButton: {
-    flex: 1,
-    minWidth: 60,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: spacing.xs,
-  },
   unreadDot: {
     position: 'absolute',
-    left: 0,
-    top: spacing.md,
+    left: 8,
+    top: 12,
     width: 8,
     height: 8,
     borderRadius: 4,
-  },
-  separator: {
-    height: 0,
+    zIndex: 1,
   },
   centerContainer: {
     flex: 1,

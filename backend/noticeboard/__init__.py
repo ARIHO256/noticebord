@@ -1,9 +1,3 @@
-try:
-    import pymysql  # type: ignore
+from .celery import app as celery_app
 
-    pymysql.install_as_MySQLdb()
-except Exception:
-    # PyMySQL is optional; used when MySQL is configured
-    pass
-
-
+__all__ = ("celery_app",)

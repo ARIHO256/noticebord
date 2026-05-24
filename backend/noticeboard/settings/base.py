@@ -237,3 +237,7 @@ X_FRAME_OPTIONS = "DENY"
 
 # Data retention (GDPR)
 DATA_RETENTION_DAYS = 2555  # 7 years for university records
+
+# Ensure logs directory exists
+_LOGS_DIR = BASE_DIR / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)

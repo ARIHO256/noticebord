@@ -4,3 +4,34 @@ mobile/node_modules/
 # Python virtual environments
 .venv/
 backend/.venv/
+
+# Environment variables - never commit secrets
+.env
+backend/.env
+mobile/.env
+*.env.local
+*.env.production
+
+# Database files (local dev)
+*.sqlite3
+db.sqlite3
+
+# Media uploads
+backend/media/
+
+# Static files
+backend/staticfiles/
+
+# Logs
+backend/logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

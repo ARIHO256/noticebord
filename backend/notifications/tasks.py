@@ -13,8 +13,12 @@ def send_push_notification(self, notification_id):
         notification = Notification.objects.get(id=notification_id)
         user = notification.user
         
-        # Check if user has device tokens
-        device_tokens = user.device_tokens.filter(push_enabled=True)
+        # Check if user has push enabled and device tokens
+        if not user.push_enabled:
+            logger.info(f"Push disabled for user {user.id}")
+            return {"status": "push_disabled"}
+        
+        device_tokens = user.device_tokens.all()
         if not device_tokens.exists():
             logger.info(f"No device tokens for user {user.id}")
             return {"status": "no_tokens"}

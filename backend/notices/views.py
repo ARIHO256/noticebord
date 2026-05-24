@@ -28,6 +28,7 @@ from .models import (
     Report,
 )
 from .serializers import AttachmentSerializer, CommentSerializer, NoticeSerializer, NoticeTemplateSerializer, ReportSerializer
+from users.throttling import CommentRateThrottle, ReportRateThrottle
 
 
 LEADERSHIP_KEYWORDS = ["registrar", "administrator", "admin", "hod", "head of department"]
@@ -393,14 +394,10 @@ class NoticeViewSet(viewsets.ModelViewSet):
         # Log moderation check for audit trail
         logger.info(f"Notice {notice.id} passed text content moderation")
         
-        # Analyze attachments for harmful content after creation
-        # This runs asynchronously to avoid blocking the response
-        # Note: Analysis happens when attachments are uploaded, not here
-        # self._analyze_and_suspend_if_needed(notice)  # Commented out - analysis happens on attachment upload
-        
-        # Send push to department users if scheduled_at is now or past
+        # Deliver notifications asynchronously if scheduled_at is now or past
         if not notice.scheduled_at or notice.scheduled_at <= timezone.now():
-            self._send_push_to_department(notice)
+            from .services import deliver_notice_notifications
+            deliver_notice_notifications(notice)
     
     def _analyze_attachment_and_suspend_if_needed(self, notice, attachment):
         """Image/video moderation disabled; no automatic suspension."""
@@ -491,23 +488,31 @@ class NoticeViewSet(viewsets.ModelViewSet):
         designation = (getattr(user, "designation", "") or "").lower()
         return any(keyword in designation for keyword in LEADERSHIP_KEYWORDS)
     def get_object(self):
-        """Override get_object to allow admin/staff to access suspended posts"""
+        """Override get_object to allow admin/staff and owners to access suspended posts"""
         # Get the lookup value from kwargs
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
         lookup_value = self.kwargs[lookup_url_kwarg]
         
-        # For admin/staff, bypass queryset filtering and get directly from DB
         user = self.request.user
+        
+        # For admin/staff, bypass queryset filtering and get directly from DB
         if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False):
             try:
-                # Get notice directly from database (bypass queryset filtering)
                 notice = Notice.objects.get(pk=lookup_value)
                 return notice
             except Notice.DoesNotExist:
                 from rest_framework.exceptions import NotFound
                 raise NotFound("Notice not found.")
         
-        # For non-admin users, use the default behavior
+        # For owners, allow them to retrieve their own suspended notices
+        try:
+            notice = Notice.objects.get(pk=lookup_value)
+            if notice.created_by == user:
+                return notice
+        except Notice.DoesNotExist:
+            pass
+        
+        # For everyone else, use the default behavior (respects queryset filtering)
         return super().get_object()
     
     def retrieve(self, request, *args, **kwargs):
@@ -584,7 +589,7 @@ class NoticeViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=["get", "post"], url_path="comments")
+    @action(detail=True, methods=["get", "post"], url_path="comments", throttle_classes=[CommentRateThrottle])
     def comments(self, request, pk=None):
         from moderation.views import check_text_content
         import logging
@@ -613,6 +618,8 @@ class NoticeViewSet(viewsets.ModelViewSet):
         
         # Check comment text for violations
         comment_text = payload.get('text', '')
+        if isinstance(comment_text, list):
+            comment_text = comment_text[0] if comment_text else ''
         text_result = check_text_content(comment_text)
         
         if not text_result['is_safe']:
@@ -650,10 +657,18 @@ class NoticeViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="attachments", parser_classes=[MultiPartParser, FormParser])
     def attachments(self, request, pk=None):
+        from .validators import validate_attachment
         notice = self.get_object()
         uploaded_file = request.FILES.get("file") or request.FILES.get("image")
         if not uploaded_file:
             return Response({"detail": "No file provided"}, status=400)
+        
+        # Validate file
+        try:
+            validate_attachment(uploaded_file)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
         content_type = getattr(uploaded_file, "content_type", "") or mimetypes.guess_type(uploaded_file.name)[0] or ""
         if content_type.startswith("image/"):
             file_type = "image"
@@ -685,7 +700,7 @@ class NoticeViewSet(viewsets.ModelViewSet):
         a.delete()
         return Response({"status": "deleted"})
 
-    @action(detail=True, methods=["post"], url_path="report")
+    @action(detail=True, methods=["post"], url_path="report", throttle_classes=[ReportRateThrottle])
     def report(self, request, pk=None):
         notice = self.get_object()
         serializer = ReportSerializer(data=request.data)
@@ -694,115 +709,8 @@ class NoticeViewSet(viewsets.ModelViewSet):
         return Response({"status": "reported"})
 
     def _send_push_to_department(self, notice: Notice) -> None:
-        """
-        Send push notifications based on notice source and department rules:
-        - Cross-cutting departments → all students
-        - HOD notices → only students in that department
-        - Dean notices → only students in that school
-        - Default notices → only students in the notice creator's school/department
-        """
-        fcm_key = getattr(settings, "FCM_SERVER_KEY", None)
-        if not fcm_key:
-            return
-        from users.models import DeviceToken, User  # local import
-        
-        notice_department = notice.department or ""
-        notice_creator = notice.created_by
-        creator_designation_value = getattr(notice_creator, "designation", "") or ""
-        creator_designation = creator_designation_value  # For backward compatibility with string matching
-        creator_department = getattr(notice_creator, "department", "") or ""
-        creator_school = getattr(notice_creator, "school", "") or ""
-        
-        # Check if notice is from cross-cutting department
-        is_cross_cutting = False
-        
-        # Check designation value directly
-        if creator_designation_value in ["vice_chancellor", "registrar", "business_office", "security"]:
-            is_cross_cutting = True
-        else:
-            # Check department names
-            for dept in CROSS_CUTTING_OFFICIAL_DEPARTMENTS:
-                if (dept.lower() in notice_department.lower() or 
-                    dept.lower() in creator_designation.lower() or
-                    dept.lower() in creator_department.lower()):
-                    is_cross_cutting = True
-                    break
-        
-        # Determine target users
-        if is_cross_cutting:
-            # Cross-cutting: send to all students
-            users = User.objects.filter(is_staff=False, is_superuser=False)
-        elif creator_designation_value == "hod" or "hod" in creator_designation.lower() or "head of department" in creator_designation.lower():
-            # HOD notices: only students in that department
-            target_dept = notice_department or creator_department
-            if target_dept:
-                users = User.objects.filter(
-                    department=target_dept,
-                    is_staff=False,
-                    is_superuser=False
-                )
-            else:
-                return  # No department specified, skip
-        elif creator_designation_value == "dean" or "dean" in creator_designation.lower() or "director" in creator_designation.lower():
-            # Dean notices: only students in that school
-            target_school = creator_school
-            if target_school:
-                users = User.objects.filter(
-                    school=target_school,
-                    is_staff=False,
-                    is_superuser=False
-                )
-            else:
-                return  # No school specified, skip
-        elif creator_designation_value == "lecturer":
-            # Lecturer notices: send to their department
-            target_dept = notice_department or creator_department
-            if target_dept:
-                users = User.objects.filter(
-                    department=target_dept,
-                    is_staff=False,
-                    is_superuser=False
-                )
-            else:
-                return  # No department specified, skip
-        else:
-            # Default: send only to users in the same department or, if absent, the same school
-            target_dept = notice_department or creator_department
-            if target_dept:
-                users = User.objects.filter(
-                    department=target_dept,
-                    is_staff=False,
-                    is_superuser=False
-                )
-            else:
-                target_school = creator_school
-                if target_school:
-                    users = User.objects.filter(
-                        school=target_school,
-                        is_staff=False,
-                        is_superuser=False
-                    )
-                else:
-                    # No targeting info; skip sending to avoid spamming unrelated students
-                    return
-        
-        tokens = list(DeviceToken.objects.filter(user__in=users, user__push_enabled=True).values_list("token", flat=True))
-        if not tokens:
-            return
-        try:
-            requests.post(
-                "https://exp.host/--/api/v2/push/send",
-                json=[{
-                    "to": t,
-                    "title": f"{notice.title}",
-                    "body": (notice.description[:100] + ("…" if len(notice.description) > 100 else "")),
-                    "data": {"noticeId": notice.id},
-                } for t in tokens],
-                headers={"Content-Type": "application/json", "Authorization": f"Bearer {fcm_key}"},
-                timeout=4,
-            )
-        except Exception:
-            return
+        """DEPRECATED: Use deliver_notice_notifications() from .services instead."""
+        pass
 
     @action(detail=False, methods=["get"])
     def trending(self, request):
@@ -878,9 +786,8 @@ class NoticeViewSet(viewsets.ModelViewSet):
             official_qs = official_base_qs.filter(
                 cross_cutting_filter | department_filter | school_filter
             )
-            # If nothing matches (e.g., missing department/school on profile), fall back to all official notices
-            if not official_qs.exists():
-                official_qs = official_base_qs
+            # Security: Do NOT fall back to all official notices if user has no dept/school.
+            # Cross-cutting notices are always visible; department/school notices require matching profile.
 
         # Order by priority, then pinned, then created_at
         from django.db.models import Case, When, IntegerField
@@ -999,6 +906,51 @@ class NoticeViewSet(viewsets.ModelViewSet):
             "avg_views": round(avg_views, 2),
             "avg_likes": round(avg_likes, 2),
         })
+
+    @action(detail=False, methods=["get"], url_path="search")
+    def search_notices(self, request):
+        """Full-text search for notices using PostgreSQL, falling back to icontains on SQLite."""
+        query = request.query_params.get("q", "").strip()
+        if not query or len(query) < 2:
+            return Response(
+                {"detail": "Search query must be at least 2 characters."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        from django.db import connection
+        
+        if connection.vendor == "postgresql":
+            from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank
+            
+            search_vector = (
+                SearchVector("title", weight="A")
+                + SearchVector("description", weight="B")
+                + SearchVector("department", weight="C")
+            )
+            search_query = SearchQuery(query)
+            
+            results = (
+                Notice.objects.annotate(
+                    rank=SearchRank(search_vector, search_query)
+                )
+                .filter(rank__gte=0.1)
+                .order_by("-rank")
+            )
+        else:
+            # Fallback for SQLite and other databases
+            results = Notice.objects.filter(
+                Q(title__icontains=query)
+                | Q(description__icontains=query)
+                | Q(department__icontains=query)
+            ).order_by("-created_at")
+        
+        page = self.paginate_queryset(results)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(results, many=True)
+        return Response(serializer.data)
 
 
 class NoticeTemplateViewSet(viewsets.ModelViewSet):

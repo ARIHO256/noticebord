@@ -1,5 +1,8 @@
 from django.db import models
 from django.shortcuts import get_object_or_404
+from django.core.mail import send_mail
+from django.conf import settings
+from django.utils.crypto import get_random_string
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -16,6 +19,9 @@ from .serializers import (
     UserSerializer,
 )
 from .authentication import AllowInactiveUserJWTAuthentication
+from audit.middleware import log_action
+from notifications.signals import create_notification
+from users.throttling import LoginRateThrottle, RegisterRateThrottle, FriendRequestRateThrottle
 
 
 class IsSelfOrAdmin(permissions.BasePermission):
@@ -96,6 +102,31 @@ class UserViewSet(viewsets.ModelViewSet):
             if isinstance(departments, list):
                 user.followed_departments = departments
             user.save()
+            
+            # Sync with NotificationPreference model
+            try:
+                from notifications.models import NotificationPreference
+                np, _ = NotificationPreference.objects.get_or_create(user=user)
+                # Map legacy JSON keys to model fields if provided
+                bool_map = {
+                    "notify_new_notices": "notify_new_notices",
+                    "notify_official_notices": "notify_official_notices",
+                    "notify_messages": "notify_messages",
+                    "notify_friend_requests": "notify_friend_requests",
+                    "notify_comments": "notify_comments",
+                    "notify_likes": "notify_likes",
+                    "push_new_notices": "push_new_notices",
+                    "push_official_notices": "push_official_notices",
+                    "push_messages": "push_messages",
+                    "email_official_notices": "email_official_notices",
+                }
+                for json_key, model_field in bool_map.items():
+                    if json_key in preferences:
+                        setattr(np, model_field, bool(preferences[json_key]))
+                np.save()
+            except Exception:
+                pass  # Don't fail if sync fails
+        
         return Response({
             "notification_preferences": user.notification_preferences or {},
             "followed_departments": user.followed_departments or [],
@@ -139,8 +170,32 @@ class UserViewSet(viewsets.ModelViewSet):
                 {"detail": "You cannot suspend superusers."},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        before_data = {"is_active": user.is_active}
         user.is_active = False
         user.save()
+        
+        log_action(
+            actor=request.user,
+            action="suspend",
+            target_type="users.User",
+            target_id=user.id,
+            target_repr=f"Suspended user {user.username}",
+            before_data=before_data,
+            after_data={"is_active": False},
+            request=request,
+        )
+        
+        # Notify user
+        create_notification(
+            user=user,
+            notification_type="suspension",
+            title="Account Suspended",
+            message="Your account has been suspended. Please contact administration or submit an appeal.",
+            sender=request.user,
+            data={"appeal_url": "/api/v1/users/profiles/appeal/"},
+        )
+        
         serializer = self.get_serializer(user)
         return Response(serializer.data)
 
@@ -153,8 +208,22 @@ class UserViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         user = self.get_object()
+        
+        before_data = {"is_active": user.is_active}
         user.is_active = True
         user.save()
+        
+        log_action(
+            actor=request.user,
+            action="unsuspend",
+            target_type="users.User",
+            target_id=user.id,
+            target_repr=f"Unsuspended user {user.username}",
+            before_data=before_data,
+            after_data={"is_active": True},
+            request=request,
+        )
+        
         serializer = self.get_serializer(user)
         return Response(serializer.data)
 
@@ -260,13 +329,42 @@ class AppealView(APIView):
 class RegisterViewSet(viewsets.GenericViewSet):
     permission_classes = [permissions.AllowAny]
     serializer_class = RegisterSerializer
+    throttle_classes = [RegisterRateThrottle]
 
     @action(detail=False, methods=["post"], permission_classes=[permissions.AllowAny])
     def register(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        return Response(UserSerializer(user, context={"request": request}).data)
+        
+        # Generate email verification token
+        user.email_verification_token = get_random_string(64)
+        user.email_verified = False
+        user.save(update_fields=["email_verification_token", "email_verified"])
+        
+        # Send verification email
+        verification_url = f"{request.scheme}://{request.get_host()}/api/v1/users/verify-email/?token={user.email_verification_token}"
+        send_mail(
+            subject="Verify your Bugema University NoticeBoard account",
+            message=f"Click this link to verify your email: {verification_url}",
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=True,
+        )
+        
+        log_action(
+            actor=user,
+            action="create",
+            target_type="users.User",
+            target_id=user.id,
+            target_repr=f"Registered user {user.username}",
+            request=request,
+        )
+        
+        return Response({
+            **UserSerializer(user, context={"request": request}).data,
+            "message": "Registration successful. Please check your email to verify your account.",
+        })
 
     @action(detail=False, methods=["post"], permission_classes=[permissions.IsAuthenticated], url_path="register-staff")
     def register_staff(self, request):
@@ -303,17 +401,79 @@ class RegisterViewSet(viewsets.GenericViewSet):
         return Response({"status": "unregistered"})
 
 
+class EmailVerificationView(APIView):
+    """Verify user email address."""
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        token = request.query_params.get("token")
+        if not token:
+            return Response({"error": "Token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            user = User.objects.get(email_verification_token=token)
+            user.email_verified = True
+            user.email_verification_token = ""
+            user.save(update_fields=["email_verified", "email_verification_token"])
+            
+            log_action(
+                actor=user,
+                action="update",
+                target_type="users.User",
+                target_id=user.id,
+                target_repr=f"Email verified for {user.username}",
+                request=request,
+            )
+            
+            return Response({"message": "Email verified successfully. You can now log in."})
+        except User.DoesNotExist:
+            return Response({"error": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResendVerificationEmailView(APIView):
+    """Resend email verification link."""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        if not email:
+            return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            user = User.objects.get(email=email)
+            if user.email_verified:
+                return Response({"message": "Email is already verified."})
+            
+            user.email_verification_token = get_random_string(64)
+            user.save(update_fields=["email_verification_token"])
+            
+            verification_url = f"{request.scheme}://{request.get_host()}/api/v1/users/verify-email/?token={user.email_verification_token}"
+            send_mail(
+                subject="Verify your Bugema University NoticeBoard account",
+                message=f"Click this link to verify your email: {verification_url}",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=True,
+            )
+            
+            return Response({"message": "Verification email sent."})
+        except User.DoesNotExist:
+            # Don't reveal if email exists
+            return Response({"message": "If an account exists, a verification email has been sent."})
+
+
 class EmailTokenObtainPairView(TokenObtainPairView):
     """
     SimpleJWT token view that authenticates using email address.
     """
-
+    throttle_classes = [LoginRateThrottle]
     serializer_class = EmailTokenObtainPairSerializer
 
 
 class FriendRequestViewSet(viewsets.ModelViewSet):
     serializer_class = FriendRequestSerializer
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [FriendRequestRateThrottle]
 
     def get_queryset(self):
         user = self.request.user

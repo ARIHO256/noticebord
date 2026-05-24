@@ -123,7 +123,7 @@ function Router() {
       </Stack.Navigator>
     );
   }
-  if (token) registerForPushNotificationsAsync();
+
   const AuthedTabs = () => (
     <ThemedTabs />
   );
@@ -207,6 +207,7 @@ function Router() {
             const map: Record<string, string> = {
               HomeTab: focused ? 'home' : 'home-outline',
               OfficialNoticesTab: focused ? 'file-document-multiple' : 'file-document-multiple-outline',
+              NotificationsTab: focused ? 'bell' : 'bell-outline',
               InboxTab: focused ? 'message-text' : 'message-outline',
               FriendsTab: focused ? 'account-multiple' : 'account-multiple-outline',
               AdminTab: focused ? 'shield-account' : 'shield-account-outline',
@@ -223,6 +224,8 @@ function Router() {
               badge = badges.official;
             } else if (route.name === 'FriendsTab') {
               badge = badges.friends;
+            } else if (route.name === 'NotificationsTab') {
+              badge = badges.notifications;
             }
 
             return (
@@ -239,7 +242,6 @@ function Router() {
                   backgroundColor: focused ? 'rgba(37, 211, 102, 0.15)' : 'transparent',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  transition: 'all 200ms ease-out',
                 }}>
                   <MaterialCommunityIcons name={name as keyof typeof MaterialCommunityIcons.glyphMap} color={color} size={iconSize} />
                 </View>
@@ -288,13 +290,27 @@ function Router() {
         <Tab.Screen
           name="OfficialNoticesTab"
           component={HomeScreen}
-          options={{ title: 'Official Notices' }}
+          options={{ title: 'Official' }}
           initialParams={{ mode: 'official' }}
           listeners={{
             tabPress: async () => {
               try {
                 const count = await fetchOfficialNoticesCount();
                 markOfficialNoticesViewed(count);
+              } catch {
+                // ignore
+              }
+            },
+          }}
+        />
+        <Tab.Screen
+          name="NotificationsTab"
+          component={NotificationsScreen}
+          options={{ title: 'Alerts' }}
+          listeners={{
+            tabPress: async () => {
+              try {
+                queryClient.invalidateQueries({ queryKey: ['notifications'] });
               } catch {
                 // ignore
               }

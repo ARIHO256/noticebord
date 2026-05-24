@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DeviceToken, FriendRequest, Friendship, User
+from .models import DeviceToken, FriendRequest, Friendship, SuspensionAppeal, User
 
 
 @admin.register(User)
@@ -34,4 +34,12 @@ class FriendRequestAdmin(admin.ModelAdmin):
 class FriendshipAdmin(admin.ModelAdmin):
     list_display = ("id", "user_a", "user_b", "created_at")
     search_fields = ("user_a__username", "user_b__username")
+
+
+@admin.register(SuspensionAppeal)
+class SuspensionAppealAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "message", "reviewed", "reviewed_by", "created_at")
+    list_filter = ("reviewed",)
+    search_fields = ("user__username", "message")
+    readonly_fields = ("created_at", "reviewed_at")
 
