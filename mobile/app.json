@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "NoticeBoard",
+    "slug": "noticeboard",
+    "scheme": "noticeboard",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/bugema-official-logo.png",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "updates": {
+      "enabled": false
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.achiever256.noticeboard"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/bugema-official-logo.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.achiever256.noticeboard"
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/bugema-official-logo.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "9bf15646-32c5-402e-a14b-1ccfab29242d"
+      }
+    }
+  }
+}

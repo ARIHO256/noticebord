@@ -1,0 +1,6 @@
+# Node dependencies
+mobile/node_modules/
+
+# Python virtual environments
+.venv/
+backend/.venv/
