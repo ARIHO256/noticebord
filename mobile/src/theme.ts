@@ -13,6 +13,7 @@ export const typography = {
 };
 
 export type Theme = {
+  mode?: 'light' | 'dark';
   colors: {
     background: string;
     backgroundAlt: string;

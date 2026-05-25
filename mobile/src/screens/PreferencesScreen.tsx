@@ -24,7 +24,7 @@ const LANGUAGES = [
   { code: 'fr', name: 'Français', flag: '🇫🇷' },
 ];
 
-const THEMES = [
+const THEMES: { key: 'light' | 'dark' | 'system'; name: string; icon: string }[] = [
   { key: 'light', name: 'Light', icon: 'white-balance-sunny' },
   { key: 'dark', name: 'Dark', icon: 'weather-night' },
   { key: 'system', name: 'System', icon: 'theme-light-dark' },
@@ -206,7 +206,7 @@ export default function PreferencesScreen() {
             label="Quiet Hours"
             description="Mute notifications 10PM — 7AM"
             value={prefs.quiet_hours_enabled}
-            onChange={(v) => setPrefs({ ...prefs, quiet_hours_enabled: v })}
+            onChange={(v: boolean) => setPrefs({ ...prefs, quiet_hours_enabled: v })}
           />
 
           <Text style={[styles.subSection, { color: theme.colors.text }]}>Notify me for</Text>
@@ -216,7 +216,7 @@ export default function PreferencesScreen() {
               label={cat.label}
               icon={cat.icon}
               value={prefs.categories?.[cat.key] !== false}
-              onChange={(v) => setPrefs({ ...prefs, categories: { ...prefs.categories, [cat.key]: v } })}
+              onChange={(v: boolean) => setPrefs({ ...prefs, categories: { ...prefs.categories, [cat.key]: v } })}
             />
           ))}
         </ModernCard>

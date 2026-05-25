@@ -106,29 +106,52 @@ def get_scope_filter(user, model_name="notice"):
 
     designation = (getattr(user, "designation", "") or "").lower()
 
+    # For Notice model, school is derived from creator profile.
+    # For user-scoped models, school is a direct field.
+    is_notice_model = (model_name or "").lower() == "notice"
+    school_field = "created_by__school" if is_notice_model else "school"
+
+    general_departments = (
+        Q(department="")
+        | Q(department__isnull=True)
+        | Q(department__iexact="general")
+        | Q(department__iexact="all")
+        | Q(department__iexact="all_students_and_staff")
+    )
+
+    def department_match(value: str):
+        if not value:
+            return Q()
+        return Q(department__iexact=value)
+
     # Cross-cutting: see everything
     if designation in CROSS_CUTTING_DESIGNATIONS:
         return Q()
 
     # Dean: see their school
     if designation == "dean":
-        return Q(school=user.school) | Q(department="") | Q(department__isnull=True)
+        school_value = getattr(user, "school", "")
+        if school_value:
+            return Q(**{school_field: school_value}) | general_departments
+        return general_departments
 
     # HOD: see their department
     if designation == "hod":
-        return Q(department=user.department) | Q(department="") | Q(department__isnull=True)
+        return department_match(getattr(user, "department", "")) | general_departments
 
     # Lecturer: see their department
     if designation == "lecturer":
-        return Q(department=user.department) | Q(department="") | Q(department__isnull=True)
+        return department_match(getattr(user, "department", "")) | general_departments
 
     # Student: see their school/department, followed departments, and general
     followed = getattr(user, "followed_departments", []) or []
-    filters = Q(department="") | Q(department__isnull=True) | Q(department__in=followed)
-    if user.school:
-        filters |= Q(school=user.school)
-    if user.department:
-        filters |= Q(department=user.department)
+    filters = general_departments
+    for dept in followed:
+        if dept:
+            filters |= Q(department__iexact=dept)
+    if getattr(user, "school", ""):
+        filters |= Q(**{school_field: user.school})
+    filters |= department_match(getattr(user, "department", ""))
     return filters
 
 

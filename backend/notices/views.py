@@ -68,7 +68,7 @@ class NoticeViewSet(viewsets.ModelViewSet):
         # Exclude suspended notices for non-staff
         user = self.request.user
         if not user.is_staff:
-            qs = qs.filter(suspension_reason="")
+            qs = qs.filter(Q(suspension_reason="") | Q(suspension_reason__isnull=True))
         # Apply command chain scope filtering
         scope_filter = get_scope_filter(user, "notice")
         if scope_filter:
@@ -95,7 +95,6 @@ class NoticeViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
         department_value = user.department if user.department else "General"
-        school_value = user.school if user.school else ""
         category_value = serializer.validated_data.get("category", "general")
 
         # Auto-title for students
@@ -105,7 +104,11 @@ class NoticeViewSet(viewsets.ModelViewSet):
                 title = f"Notice from {user.get_full_name() or user.username}"
                 serializer.validated_data["title"] = title
 
-        instance = serializer.save(created_by=user, department=department_value, school=school_value, category=category_value)
+        instance = serializer.save(
+            created_by=user,
+            department=department_value,
+            category=category_value,
+        )
         # Content moderation
         text_to_check = f"{instance.title} {instance.description}"
         moderation = moderate_text(text_to_check)

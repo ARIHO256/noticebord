@@ -1,10 +1,40 @@
-"""Redis caching configuration for high-performance API responses."""
+"""Caching configuration for Redis (prod) with safe local defaults."""
 import os
 
 
+def _as_bool(value, default=False):
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def configure_caching(settings):
-    """Configure Django caching with Redis."""
+    """
+    Configure Django caching.
+
+    Default behavior:
+      - production: Redis cache
+      - local/dev: in-memory cache
+
+    Override behavior with USE_REDIS_CACHE=1 to force Redis in local/dev.
+    """
+    env = os.environ.get("DJANGO_ENV", "local").lower()
     redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    use_redis_cache = _as_bool(
+        os.environ.get("USE_REDIS_CACHE"),
+        default=(env == "production"),
+    )
+
+    if not use_redis_cache:
+        settings["CACHES"] = {
+            "default": {
+                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                "LOCATION": "noticeboard-local-cache",
+                "TIMEOUT": 300,
+            }
+        }
+        settings["CACHEOPS_ENABLED"] = False
+        return
 
     settings["CACHES"] = {
         "default": {
@@ -17,7 +47,7 @@ def configure_caching(settings):
                 "RETRY_ON_TIMEOUT": True,
             },
             "KEY_PREFIX": "noticeboard",
-            "TIMEOUT": 300,  # 5 minutes default
+            "TIMEOUT": 300,
         }
     }
 

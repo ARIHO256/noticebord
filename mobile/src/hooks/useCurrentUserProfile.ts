@@ -10,15 +10,28 @@ export type CurrentUserProfile = {
   first_name?: string | null;
   last_name?: string | null;
   avatar_url?: string | null;
+  cover_photo_url?: string | null;
   department?: string | null;
   designation?: string | null;
   phone?: string | null;
   school?: string | null;
   course?: string | null;
   academic_year?: string | null;
+  bio?: string | null;
+  linkedin_url?: string | null;
+  twitter_url?: string | null;
+  campus?: string | null;
   is_faculty?: boolean;
   is_staff?: boolean;
   is_superuser?: boolean;
+  is_alumni?: boolean;
+  biometric_enabled?: boolean;
+  theme_preference?: string;
+  language?: string;
+  digest_frequency?: string;
+  push_enabled?: boolean;
+  followed_departments?: string[];
+  notification_preferences?: Record<string, any>;
 };
 
 export const useCurrentUserProfile = () => {

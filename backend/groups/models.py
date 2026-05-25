@@ -32,6 +32,7 @@ class Group(models.Model):
 
     is_active = models.BooleanField(default=True)
     is_public = models.BooleanField(default=False)
+    is_official = models.BooleanField(default=False, help_text="Official university groups (created by staff only)")
     only_admin_can_post = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)

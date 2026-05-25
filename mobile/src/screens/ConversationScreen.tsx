@@ -288,7 +288,7 @@ export default function ConversationScreen({ route, navigation }: any) {
               </View>
             )}
             {item.attachment_url && (
-              <TouchableOpacity onPress={() => setPreviewAttachment({ id: item.id, url: item.attachment_url, file_type: item.attachment_type || undefined })}>
+              <TouchableOpacity onPress={() => setPreviewAttachment({ id: item.id, url: item.attachment_url as string, file_type: (item.attachment_type || undefined) as string | undefined })}>
                 {item.attachment_type === 'video' ? (
                   <View style={styles.attachmentBox}>
                     <MaterialCommunityIcons name="play-circle" size={40} color="#fff" />

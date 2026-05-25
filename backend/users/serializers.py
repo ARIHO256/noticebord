@@ -34,7 +34,9 @@ class MiniUserSerializer(serializers.ModelSerializer):
 
 class UserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
+    cover_photo_url = serializers.SerializerMethodField()
     avatar = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    cover_photo = serializers.ImageField(write_only=True, required=False, allow_null=True)
     friend_status = serializers.SerializerMethodField()
     friend_request_id = serializers.SerializerMethodField()
     mutual_friend_count = serializers.SerializerMethodField()
@@ -57,16 +59,42 @@ class UserSerializer(serializers.ModelSerializer):
             "phone",
             "avatar",
             "avatar_url",
+            "cover_photo",
+            "cover_photo_url",
+            "bio",
+            "linkedin_url",
+            "twitter_url",
+            "campus",
+            "is_alumni",
+            "graduation_year",
+            "biometric_enabled",
+            "two_factor_enabled",
+            "language",
+            "theme_preference",
+            "digest_frequency",
+            "push_enabled",
+            "followed_departments",
+            "notification_preferences",
+            "last_password_change",
             "friend_status",
             "friend_request_id",
             "mutual_friend_count",
         ]
-        read_only_fields = ["id", "username", "email", "is_staff"]
+        read_only_fields = ["id", "username", "email", "is_staff", "last_password_change"]
 
     def get_avatar_url(self, obj):
         request = self.context.get("request")
         if getattr(obj, "avatar", None):
             url = obj.avatar.url
+            if request is not None:
+                return request.build_absolute_uri(url)
+            return url
+        return None
+
+    def get_cover_photo_url(self, obj):
+        request = self.context.get("request")
+        if getattr(obj, "cover_photo", None):
+            url = obj.cover_photo.url
             if request is not None:
                 return request.build_absolute_uri(url)
             return url
@@ -130,6 +158,12 @@ class PublicUserSerializer(UserSerializer):
             "course",
             "academic_year",
             "avatar_url",
+            "cover_photo_url",
+            "bio",
+            "linkedin_url",
+            "twitter_url",
+            "campus",
+            "is_alumni",
             "friend_status",
             "friend_request_id",
             "mutual_friend_count",

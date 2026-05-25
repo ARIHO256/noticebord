@@ -10,8 +10,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "noticeboard.settings")
 django_asgi_app = get_asgi_application()
 
 from django.urls import path
-from notifications.consumers import NotificationConsumer
-from messaging.consumers import ConversationConsumer
+from notifications.consumers import NotificationConsumer, ConversationConsumer
 from groups.consumers import GroupChatConsumer
 from events.consumers import EventLiveConsumer
 

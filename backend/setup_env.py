@@ -74,6 +74,7 @@ DEFAULT_FROM_EMAIL=Bugema University <noreply@bugema.ac.ug>
 REDIS_URL=redis://redis:6379/1
 CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/0
+USE_REDIS_CACHE=1
 
 # Security
 SECURE_SSL_REDIRECT=1
@@ -118,6 +119,7 @@ DEFAULT_FROM_EMAIL=Bugema University <noreply@bugema.ac.ug>
 REDIS_URL=redis://localhost:6379/1
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/0
+USE_REDIS_CACHE=0
 
 # Logging
 LOG_LEVEL=DEBUG

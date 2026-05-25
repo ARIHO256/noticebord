@@ -25,7 +25,7 @@ class GroupListSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "description", "group_type", "avatar_url", "cover_image_url",
             "course", "department", "school", "academic_year",
-            "created_by", "is_active", "is_public", "only_admin_can_post",
+            "created_by", "is_active", "is_public", "is_official", "only_admin_can_post",
             "member_count", "is_member", "user_role",
             "created_at", "updated_at",
         ]

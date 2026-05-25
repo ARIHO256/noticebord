@@ -6,6 +6,9 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
+from rest_framework.exceptions import PermissionDenied
+from users.models import UserDesignation
+from users.command_chain import get_command_level, CROSS_CUTTING_DESIGNATIONS
 from .models import Group, GroupMembership, GroupMessage, GroupMessageRead
 from .serializers import (
     GroupListSerializer,
@@ -33,16 +36,41 @@ class GroupViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         qs = qs.annotate(member_count=Count("memberships", filter=Q(memberships__is_active=True)))
+        user = self.request.user
+        
+        # Scope filtering based on command chain
+        designation = (getattr(user, "designation", "") or "").lower()
+        if not user.is_staff and designation not in CROSS_CUTTING_DESIGNATIONS:
+            # Non-staff: see public groups + their school/department groups + groups they belong to
+            scope = Q(is_public=True)
+            if user.school:
+                scope |= Q(school=user.school)
+            if user.department:
+                scope |= Q(department=user.department)
+            # Always include groups they are members of
+            scope |= Q(memberships__user=user, memberships__is_active=True)
+            qs = qs.filter(scope)
+        
         my_groups = self.request.query_params.get("my_groups")
         if my_groups == "1":
-            qs = qs.filter(memberships__user=self.request.user, memberships__is_active=True)
-        return qs
+            qs = qs.filter(memberships__user=user, memberships__is_active=True)
+        return qs.distinct()
 
     def perform_create(self, serializer):
-        group = serializer.save(created_by=self.request.user)
+        user = self.request.user
+        is_official = serializer.validated_data.get("is_official", False)
+        
+        # Only staff/cross-cutting roles can create official groups
+        if is_official:
+            designation = (getattr(user, "designation", "") or "").lower()
+            allowed = {"vice_chancellor", "registrar", "business_office", "security", "dean", "hod", "lecturer"}
+            if designation not in allowed and not user.is_staff:
+                raise PermissionDenied("Only staff can create official groups.")
+        
+        group = serializer.save(created_by=user)
         GroupMembership.objects.create(
             group=group,
-            user=self.request.user,
+            user=user,
             role=GroupMembership.Role.ADMIN,
         )
 

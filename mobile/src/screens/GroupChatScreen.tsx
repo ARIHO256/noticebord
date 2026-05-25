@@ -15,6 +15,7 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import { useCurrentUserProfile } from '../hooks/useCurrentUserProfile';
 import { fetchGroup, fetchGroupMessages, sendGroupMessage } from '../api/groups';
 import GradientHeader from '../components/GradientHeader';
 
@@ -48,8 +49,9 @@ export default function GroupChatScreen() {
     }
   }, [messages]);
 
+  const { data: currentUser } = useCurrentUserProfile();
   const renderMessage = ({ item }: { item: any }) => {
-    const isMe = false; // TODO: compare with current user id from auth context
+    const isMe = currentUser ? item.sender?.id === currentUser.id : false;
     return (
       <View style={[styles.msgRow, isMe && styles.msgRowMe]}>
         <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>

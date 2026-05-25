@@ -48,6 +48,7 @@ export type ConversationMessage = {
     attachment_type?: string | null;
     attachment_name?: string | null;
   } | null;
+  reactions?: { reaction: string; user: MiniUser }[];
 };
 
 export const fetchConversations = async (): Promise<Conversation[]> => {

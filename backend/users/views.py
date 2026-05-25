@@ -113,7 +113,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get", "put"], permission_classes=[permissions.IsAuthenticated], url_path="preferences")
     def preferences(self, request):
-        """Get or update user notification preferences and followed departments."""
+        """Get or update user preferences."""
         user = request.user
         if request.method == "PUT":
             preferences = request.data.get("notification_preferences", {})
@@ -122,13 +122,25 @@ class UserViewSet(viewsets.ModelViewSet):
                 user.notification_preferences = {**user.notification_preferences, **preferences}
             if isinstance(departments, list):
                 user.followed_departments = departments
+            
+            # New preference fields
+            if "theme_preference" in request.data:
+                user.theme_preference = request.data["theme_preference"]
+            if "language" in request.data:
+                user.language = request.data["language"]
+            if "digest_frequency" in request.data:
+                user.digest_frequency = request.data["digest_frequency"]
+            if "biometric_enabled" in request.data:
+                user.biometric_enabled = bool(request.data["biometric_enabled"])
+            if "push_enabled" in request.data:
+                user.push_enabled = bool(request.data["push_enabled"])
+            
             user.save()
             
             # Sync with NotificationPreference model
             try:
                 from notifications.models import NotificationPreference
                 np, _ = NotificationPreference.objects.get_or_create(user=user)
-                # Map legacy JSON keys to model fields if provided
                 bool_map = {
                     "notify_new_notices": "notify_new_notices",
                     "notify_official_notices": "notify_official_notices",
@@ -151,6 +163,11 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response({
             "notification_preferences": user.notification_preferences or {},
             "followed_departments": user.followed_departments or [],
+            "theme_preference": user.theme_preference,
+            "language": user.language,
+            "digest_frequency": user.digest_frequency,
+            "biometric_enabled": user.biometric_enabled,
+            "push_enabled": user.push_enabled,
         })
 
     @action(detail=False, methods=["post"], permission_classes=[permissions.IsAuthenticated], url_path="follow-department")

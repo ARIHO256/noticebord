@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Switch,
+  TextInput,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -281,9 +282,6 @@ function StatItem({ icon, label, value }: { icon: string; label: string; value: 
     </View>
   );
 }
-
-const TextInput = ({ ...props }) => <TextInputNative {...props} />;
-import { TextInput as TextInputNative } from 'react-native';
 
 const styles = StyleSheet.create({
   coverWrap: { height: 180, position: 'relative' },

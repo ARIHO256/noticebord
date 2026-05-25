@@ -34,6 +34,7 @@ import { ToastProvider } from './context/ToastContext';
 import { registerForPushNotificationsAsync } from './push/registerPush';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import BiometricLock from './components/BiometricLock';
+import { useCurrentUserProfile } from './hooks/useCurrentUserProfile';
 
 // Notice Screens
 import HomeScreen from './screens/HomeScreen';
@@ -166,6 +167,16 @@ function Router() {
     );
   }
 
+  const BiometricGate = () => {
+    const { data: profile } = useCurrentUserProfile();
+    return (
+      <BiometricLock
+        enabled={!!profile?.biometric_enabled}
+        onUnlock={() => {}}
+      />
+    );
+  };
+
   const ThemedTabs = () => {
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
@@ -279,50 +290,53 @@ function Router() {
   };
 
   return (
-    <Stack.Navigator initialRouteName={token ? 'Home' : 'Login'} screenOptions={{ headerShown: false }}>
-      {!token ? (
-        <>
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Register" component={RegisterScreen} />
-        </>
-      ) : (
-        <>
-          <Stack.Screen name="Home" component={ThemedTabs} />
-          <Stack.Screen name="SuspendedUser" component={SuspendedUserScreen} />
-          <Stack.Screen name="NoticeDetail" component={NoticeDetailScreen} />
-          <Stack.Screen name="EditNotice" component={EditNoticeScreen} />
-          <Stack.Screen name="CreateNotice" component={CreateNoticeScreen} />
-          <Stack.Screen name="Profile" component={ProfileScreen} />
-          <Stack.Screen name="FacultyList" component={FacultyListScreen} />
-          <Stack.Screen name="StudentList" component={StudentListScreen} />
-          <Stack.Screen name="AdminUserList" component={AdminUserListScreen} />
-          <Stack.Screen name="AdminUserEdit" component={AdminUserEditScreen} />
-          <Stack.Screen name="AdminUserCreate" component={AdminUserCreateScreen} />
-          <Stack.Screen name="UserProfile" component={UserProfileScreen} />
-          <Stack.Screen name="Conversation" component={ConversationScreen} />
-          <Stack.Screen name="Friends" component={FriendsScreen} />
-          <Stack.Screen name="Preferences" component={PreferencesScreen} />
-          <Stack.Screen name="Analytics" component={AnalyticsDashboardScreen} />
-          <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
-          <Stack.Screen name="Violations" component={ViolationsScreen} />
-          <Stack.Screen name="Notifications" component={NotificationsScreen} />
-          {/* NEW SCREENS */}
-          <Stack.Screen name="Discover" component={DiscoverScreen} />
-          <Stack.Screen name="Events" component={EventsScreen} />
-          <Stack.Screen name="EventDetail" component={EventDetailScreen} />
-          <Stack.Screen name="Groups" component={GroupsScreen} />
-          <Stack.Screen name="GroupChat" component={GroupChatScreen} />
-          <Stack.Screen name="CampusServices" component={CampusServicesScreen} />
-          <Stack.Screen name="StaffDirectory" component={StaffDirectoryScreen} />
-          <Stack.Screen name="LostFound" component={LostFoundScreen} />
-          <Stack.Screen name="EmergencyContacts" component={EmergencyContactsScreen} />
-          <Stack.Screen name="VenueBooking" component={VenueBookingScreen} />
-          <Stack.Screen name="ShuttleSchedule" component={ShuttleScheduleScreen} />
-          <Stack.Screen name="CafeteriaMenu" component={CafeteriaMenuScreen} />
-          <Stack.Screen name="AcademicHub" component={AcademicHubScreen} />
-        </>
-      )}
-    </Stack.Navigator>
+    <>
+      <Stack.Navigator initialRouteName={token ? 'Home' : 'Login'} screenOptions={{ headerShown: false }}>
+        {!token ? (
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Register" component={RegisterScreen} />
+          </>
+        ) : (
+          <>
+            <Stack.Screen name="Home" component={ThemedTabs} />
+            <Stack.Screen name="SuspendedUser" component={SuspendedUserScreen} />
+            <Stack.Screen name="NoticeDetail" component={NoticeDetailScreen} />
+            <Stack.Screen name="EditNotice" component={EditNoticeScreen} />
+            <Stack.Screen name="CreateNotice" component={CreateNoticeScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="FacultyList" component={FacultyListScreen} />
+            <Stack.Screen name="StudentList" component={StudentListScreen} />
+            <Stack.Screen name="AdminUserList" component={AdminUserListScreen} />
+            <Stack.Screen name="AdminUserEdit" component={AdminUserEditScreen} />
+            <Stack.Screen name="AdminUserCreate" component={AdminUserCreateScreen} />
+            <Stack.Screen name="UserProfile" component={UserProfileScreen} />
+            <Stack.Screen name="Conversation" component={ConversationScreen} />
+            <Stack.Screen name="Friends" component={FriendsScreen} />
+            <Stack.Screen name="Preferences" component={PreferencesScreen} />
+            <Stack.Screen name="Analytics" component={AnalyticsDashboardScreen} />
+            <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
+            <Stack.Screen name="Violations" component={ViolationsScreen} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} />
+            {/* NEW SCREENS */}
+            <Stack.Screen name="Discover" component={DiscoverScreen} />
+            <Stack.Screen name="Events" component={EventsScreen} />
+            <Stack.Screen name="EventDetail" component={EventDetailScreen} />
+            <Stack.Screen name="Groups" component={GroupsScreen} />
+            <Stack.Screen name="GroupChat" component={GroupChatScreen} />
+            <Stack.Screen name="CampusServices" component={CampusServicesScreen} />
+            <Stack.Screen name="StaffDirectory" component={StaffDirectoryScreen} />
+            <Stack.Screen name="LostFound" component={LostFoundScreen} />
+            <Stack.Screen name="EmergencyContacts" component={EmergencyContactsScreen} />
+            <Stack.Screen name="VenueBooking" component={VenueBookingScreen} />
+            <Stack.Screen name="ShuttleSchedule" component={ShuttleScheduleScreen} />
+            <Stack.Screen name="CafeteriaMenu" component={CafeteriaMenuScreen} />
+            <Stack.Screen name="AcademicHub" component={AcademicHubScreen} />
+          </>
+        )}
+      </Stack.Navigator>
+      {token && !isSuspended && <BiometricGate />}
+    </>
   );
 }
 
@@ -352,7 +366,6 @@ export default function App() {
             <SafeAreaProvider>
               <NavigationContainer>
                 <StatusBar style="auto" />
-                <BiometricLock enabled={false} onUnlock={() => {}} />
                 <Router />
               </NavigationContainer>
             </SafeAreaProvider>

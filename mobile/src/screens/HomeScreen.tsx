@@ -144,9 +144,8 @@ export default function HomeScreen({ navigation, route }: Props) {
       setCurrentUser(r.data);
       const followed = r.data.followed_departments || [];
       setFollowedDepartments(followed);
-      if (followed.length > 0) {
-        setSelectedDepartments([r.data.department, ...followed].filter(Boolean));
-      }
+      // Keep default department filter on "All" for Home feed.
+      setSelectedDepartments([]);
     });
     api.get('/users/profiles/preferences/').then((r) => {
       const followed = r.data.followed_departments || [];
