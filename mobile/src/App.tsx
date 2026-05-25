@@ -33,6 +33,7 @@ import { AuthContext, AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { registerForPushNotificationsAsync } from './push/registerPush';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import BiometricLock from './components/BiometricLock';
 
 // Notice Screens
 import HomeScreen from './screens/HomeScreen';
@@ -351,6 +352,7 @@ export default function App() {
             <SafeAreaProvider>
               <NavigationContainer>
                 <StatusBar style="auto" />
+                <BiometricLock enabled={false} onUnlock={() => {}} />
                 <Router />
               </NavigationContainer>
             </SafeAreaProvider>

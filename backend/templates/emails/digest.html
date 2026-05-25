@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ frequency|title }} Digest</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }
+    .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+    .header { background: linear-gradient(135deg, #1877F2, #00C6FF); padding: 32px 24px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 24px; }
+    .header p { color: rgba(255,255,255,0.85); margin: 8px 0 0; }
+    .content { padding: 24px; }
+    .section { margin-bottom: 28px; }
+    .section-title { font-size: 16px; font-weight: 800; color: #1877F2; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .item { background: #f8f9fa; border-radius: 12px; padding: 14px; margin-bottom: 10px; }
+    .item-title { font-weight: 700; color: #1a1a1a; margin-bottom: 4px; }
+    .item-meta { font-size: 13px; color: #666; }
+    .footer { background: #f8f9fa; padding: 20px 24px; text-align: center; font-size: 12px; color: #888; }
+    .btn { display: inline-block; background: #1877F2; color: #fff; padding: 12px 24px; border-radius: 10px; text-decoration: none; font-weight: 700; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📬 Your {{ frequency|title }} Digest</h1>
+      <p>Bugema University NoticeBoard</p>
+    </div>
+    <div class="content">
+      <p style="color: #444; margin-bottom: 20px;">Hello {{ user.first_name|default:user.username }}, here's what you missed:</p>
+
+      {% if notices %}
+      <div class="section">
+        <div class="section-title">📌 Official Notices</div>
+        {% for notice in notices %}
+        <div class="item">
+          <div class="item-title">{{ notice.title }}</div>
+          <div class="item-meta">{{ notice.department|default:"General" }} · {{ notice.created_at|date:"M d" }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if events %}
+      <div class="section">
+        <div class="section-title">📅 Upcoming Events</div>
+        {% for event in events %}
+        <div class="item">
+          <div class="item-title">{{ event.title }}</div>
+          <div class="item-meta">{{ event.start_time|date:"M d, H:i" }} · {{ event.location|default:"TBA" }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if assignments %}
+      <div class="section">
+        <div class="section-title">📚 Assignments Due</div>
+        {% for assignment in assignments %}
+        <div class="item">
+          <div class="item-title">{{ assignment.title }}</div>
+          <div class="item-meta">Due {{ assignment.due_date|date:"M d, H:i" }} · {{ assignment.course.code|default:"General" }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if exams %}
+      <div class="section">
+        <div class="section-title">📝 Upcoming Exams</div>
+        {% for exam in exams %}
+        <div class="item">
+          <div class="item-title">{{ exam.course.code }} — {{ exam.exam_type|title }}</div>
+          <div class="item-meta">{{ exam.date|date:"M d" }} at {{ exam.start_time }} · {{ exam.venue|default:"TBA" }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div style="text-align: center; margin-top: 20px;">
+        <a href="https://noticeboard.bugema.ac.ug" class="btn">Open NoticeBoard</a>
+      </div>
+    </div>
+    <div class="footer">
+      You're receiving this because you subscribed to {{ frequency }} digests.<br>
+      <a href="https://noticeboard.bugema.ac.ug/preferences" style="color: #1877F2;">Update preferences</a>
+    </div>
+  </div>
+</body>
+</html>

@@ -30,7 +30,6 @@ class ConversationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="messages")
     def messages(self, request, pk=None):
         conversation = self.get_object()
-        # Mark unread messages as read
         conversation.messages.filter(read_at__isnull=True).exclude(sender=request.user).update(read_at=timezone.now())
         qs = conversation.messages.all()
         page = self.paginate_queryset(qs)
@@ -43,7 +42,6 @@ class ConversationViewSet(viewsets.ModelViewSet):
         serializer = ConversationMessageSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         msg = serializer.save(conversation=conversation, sender=request.user)
-        # Update conversation preview
         conversation.last_message_preview = msg.content[:100] if msg.content else (msg.attachment_name or "Attachment")
         conversation.last_message_by = request.user
         conversation.last_message_at = timezone.now()
@@ -75,6 +73,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
 
 
 class ConversationMessageViewSet(viewsets.ModelViewSet):
+    queryset = ConversationMessage.objects.all()
     serializer_class = ConversationMessageSerializer
     permission_classes = [IsAuthenticated]
 
@@ -86,6 +85,15 @@ class ConversationMessageViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         instance = serializer.save()
         instance.mark_edited()
+
+    def perform_destroy(self, instance):
+        """Allow sender to delete their own message."""
+        if instance.sender != self.request.user and not self.request.user.is_staff:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("You can only delete your own messages.")
+        instance.content = "[Message deleted]"
+        instance.attachment = None
+        instance.save(update_fields=["content", "attachment"])
 
     @action(detail=True, methods=["post"], url_path="react")
     def react(self, request, pk=None):

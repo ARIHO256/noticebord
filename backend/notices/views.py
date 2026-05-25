@@ -9,6 +9,8 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from moderation.services import moderate_text
 from users.models import UserDesignation
+from users.command_chain import get_scope_filter
+from .approval_workflow import submit_for_approval, auto_approve_if_eligible
 from .models import (
     Notice,
     Like,
@@ -67,6 +69,10 @@ class NoticeViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user.is_staff:
             qs = qs.filter(suspension_reason="")
+        # Apply command chain scope filtering
+        scope_filter = get_scope_filter(user, "notice")
+        if scope_filter:
+            qs = qs.filter(scope_filter)
         # Tag filter
         tag = self.request.query_params.get("tag")
         if tag:
@@ -89,6 +95,7 @@ class NoticeViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
         department_value = user.department if user.department else "General"
+        school_value = user.school if user.school else ""
         category_value = serializer.validated_data.get("category", "general")
 
         # Auto-title for students
@@ -98,7 +105,7 @@ class NoticeViewSet(viewsets.ModelViewSet):
                 title = f"Notice from {user.get_full_name() or user.username}"
                 serializer.validated_data["title"] = title
 
-        instance = serializer.save(created_by=user, department=department_value, category=category_value)
+        instance = serializer.save(created_by=user, department=department_value, school=school_value, category=category_value)
         # Content moderation
         text_to_check = f"{instance.title} {instance.description}"
         moderation = moderate_text(text_to_check)
@@ -106,6 +113,15 @@ class NoticeViewSet(viewsets.ModelViewSet):
             instance.is_active = False
             instance.suspension_reason = moderation.get("reason", "Content violation detected.")
             instance.save(update_fields=["is_active", "suspension_reason"])
+            return
+
+        # Approval workflow for official notices from staff
+        if getattr(user, "designation", "") in ["lecturer", "hod", "dean"]:
+            instance.is_active = False  # Hide until approved
+            instance.save(update_fields=["is_active"])
+            submit_for_approval(instance)
+        else:
+            auto_approve_if_eligible(instance)
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()

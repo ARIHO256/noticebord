@@ -93,6 +93,10 @@ export default function BeautifulButton({
       disabled={disabled}
       style={[touchableStyle, { backgroundColor: v.bg }]}
       activeOpacity={0.85}
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled }}
     >
       {content}
     </TouchableOpacity>

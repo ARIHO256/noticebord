@@ -23,14 +23,29 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.achiever256.noticeboard"
+      "bundleIdentifier": "com.achiever256.noticeboard",
+      "associatedDomains": ["applinks:noticeboard.bugema.ac.ug"]
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/bugema-official-logo.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.achiever256.noticeboard"
+      "package": "com.achiever256.noticeboard",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "noticeboard.bugema.ac.ug",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -39,11 +54,13 @@
     "extra": {
       "eas": {
         "projectId": "9bf15646-32c5-402e-a14b-1ccfab29242d"
-      }
+      },
+      "apiUrl": "https://noticeboard.bugema.ac.ug"
     },
     "plugins": [
       "expo-font",
-      "expo-video"
+      "expo-video",
+      "expo-local-authentication"
     ]
   }
 }

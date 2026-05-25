@@ -21,6 +21,7 @@ from .models import (
     PollOption,
     PollVote,
     NoticeDraft,
+    NoticeApproval,
 )
 
 
@@ -287,3 +288,30 @@ class NoticeDraftSerializer(serializers.ModelSerializer):
                 tag, _ = Tag.objects.get_or_create(name=slug, defaults={"display_name": tag_name.strip()})
                 instance.tags.add(tag)
         return instance
+
+
+class NoticeApprovalSerializer(serializers.ModelSerializer):
+    notice_title = serializers.CharField(source="notice.title", read_only=True)
+    submitted_by = MiniUserSerializer(read_only=True)
+    current_reviewer = MiniUserSerializer(read_only=True)
+    approved_by = MiniUserSerializer(read_only=True)
+    rejected_by = MiniUserSerializer(read_only=True)
+
+    class Meta:
+        model = NoticeApproval
+        fields = [
+            "id",
+            "notice",
+            "notice_title",
+            "status",
+            "submitted_by",
+            "submitted_at",
+            "current_reviewer",
+            "approved_by",
+            "approved_at",
+            "rejected_by",
+            "rejected_at",
+            "rejection_reason",
+            "escalation_chain",
+        ]
+        read_only_fields = fields

@@ -8,6 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
 from common.permissions import IsOwnerOrReadOnly, IsAdminUser
+from notifications.services import notify_event_rsvp, notify_event_reminder
 from .models import Event, RSVP, Attendance, EventAnnouncement, EventCheckIn
 from .serializers import (
     EventListSerializer,
@@ -16,6 +17,7 @@ from .serializers import (
     AttendanceSerializer,
     EventAnnouncementSerializer,
 )
+from .ical import event_ics_response
 
 
 class EventViewSet(viewsets.ModelViewSet):
@@ -59,6 +61,8 @@ class EventViewSet(viewsets.ModelViewSet):
             user=request.user,
             defaults={"status": status_choice, "notes": request.data.get("notes", "")},
         )
+        if created and status_choice == RSVP.STATUS_GOING:
+            notify_event_rsvp(event, request.user)
         return Response(RSVPSerializer(rsvp).data)
 
     @action(detail=True, methods=["post"], url_path="cancel-rsvp")
@@ -119,6 +123,11 @@ class EventViewSet(viewsets.ModelViewSet):
         qs = self.get_queryset().filter(id__in=going_ids)
         serializer = EventListSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="export-ics")
+    def export_ics(self, request, pk=None):
+        event = self.get_object()
+        return event_ics_response(event)
 
 
 class RSVPViewSet(viewsets.ReadOnlyModelViewSet):

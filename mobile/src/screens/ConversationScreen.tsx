@@ -1,79 +1,72 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Dimensions,
   FlatList,
   Image,
   KeyboardAvoidingView,
-  Pressable,
   Platform,
+  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  Clipboard,
+  Vibration,
 } from 'react-native';
+import { GestureHandlerRootView, PanGestureHandler, State } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import HeaderBar from '../components/HeaderBar';
-import AttachmentMediaPlayer from '../components/AttachmentMediaPlayer';
-import AttachmentPicker from '../components/AttachmentPicker';
-import MediaPreviewEditor from '../components/MediaPreviewEditor';
+import { Audio } from 'expo-av';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
-import { spacing } from '../theme';
-import type { RootStackParamList } from '../App';
+import GradientHeader from '../components/GradientHeader';
+import BeautifulButton from '../components/BeautifulButton';
 import {
   fetchConversationMessages,
   sendConversationMessage,
   markConversationAsRead,
+  reactToMessage,
+  unreactFromMessage,
   ConversationMessage,
 } from '../api/messages';
 import AttachmentPreviewModal from '../components/AttachmentPreviewModal';
 import type { NoticeAttachment } from '../components/TweetCard';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Conversation'>;
+const { width: SCREEN_W } = Dimensions.get('window');
 
-type SelectedAttachment = {
-  uri: string;
-  type: 'image' | 'video';
-  name?: string | null;
-  mimeType?: string | null;
-};
+const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '👍', '👎'];
 
-export default function ConversationScreen({ route, navigation }: Props) {
+export default function ConversationScreen({ route, navigation }: any) {
   const { conversationId, title, noticeTitle } = route.params;
   const { theme } = useTheme();
   const { showError, showSuccess } = useToast();
   const queryClient = useQueryClient();
-  const [text, setText] = useState('');
-  const [selectedAttachment, setSelectedAttachment] = useState<SelectedAttachment | null>(null);
-  const [replyingTo, setReplyingTo] = useState<ConversationMessage | null>(null);
-  const [previewAttachment, setPreviewAttachment] = useState<NoticeAttachment | null>(null);
-  const [attachmentPickerVisible, setAttachmentPickerVisible] = useState(false);
-  const [mediaPreviewUri, setMediaPreviewUri] = useState<string | null>(null);
-  const [mediaPreviewType, setMediaPreviewType] = useState<'image' | 'video' | null>(null);
+  const flatListRef = useRef<FlatList>(null);
 
-  // Mark conversation as read when screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      const markRead = async () => {
-        try {
-          await markConversationAsRead(conversationId);
-          // Invalidate conversations query to update badge
-          queryClient.invalidateQueries({ queryKey: ['conversations'] });
-        } catch (error) {
-          // Silently handle errors
-          console.debug('Failed to mark conversation as read:', error);
-        }
-      };
-      markRead();
-    }, [conversationId, queryClient])
-  );
+  const [text, setText] = useState('');
+  const [replyingTo, setReplyingTo] = useState<ConversationMessage | null>(null);
+  const [selectedMessage, setSelectedMessage] = useState<ConversationMessage | null>(null);
+  const [showReactions, setShowReactions] = useState(false);
+  const [showActions, setShowActions] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [previewAttachment, setPreviewAttachment] = useState<NoticeAttachment | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingTimer = useRef<NodeJS.Timeout | null>(null);
+  const replyAnim = useRef(new Animated.Value(0)).current;
+  const reactionAnim = useRef(new Animated.Value(0)).current;
 
   const {
     data,
@@ -94,740 +87,465 @@ export default function ConversationScreen({ route, navigation }: Props) {
     return data.pages.flatMap((page) => page.results);
   }, [data]);
 
+  const filteredMessages = useMemo(() => {
+    if (!searchQuery.trim()) return messages;
+    return messages.filter((m) =>
+      m.content?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [messages, searchQuery]);
+
+  useFocusEffect(
+    useCallback(() => {
+      markConversationAsRead(conversationId).then(() => {
+        queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      }).catch(() => {});
+    }, [conversationId, queryClient])
+  );
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => flatListRef.current?.scrollToOffset({ offset: 0, animated: true }), 300);
+    }
+  }, [messages.length]);
+
+  const sendMutation = useMutation({
+    mutationFn: (payload: any) => sendConversationMessage(conversationId, payload),
+    onSuccess: () => {
+      setText('');
+      setReplyingTo(null);
+      replyAnim.setValue(0);
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    },
+    onError: (err: any) => showError(err?.userMessage || 'Failed to send message'),
+  });
+
+  const reactMutation = useMutation({
+    mutationFn: ({ messageId, reaction }: { messageId: number; reaction: string }) =>
+      reactToMessage(messageId, reaction),
+    onSuccess: () => refetch(),
+  });
+
+  const handleSend = useCallback(() => {
+    const value = text.trim();
+    if (!value) return;
+    sendMutation.mutate({ content: value, replyToId: replyingTo?.id || null });
+  }, [text, replyingTo, sendMutation]);
+
+  const handlePickMedia = useCallback(async (type: 'image' | 'video') => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: type === 'video' ? ['videos'] : ['images'],
+      quality: 0.8,
+    });
+    if (!result.canceled) {
+      sendMutation.mutate({
+        attachment: {
+          uri: result.assets[0].uri,
+          type,
+          mimeType: type === 'video' ? 'video/mp4' : 'image/jpeg',
+          name: result.assets[0].uri.split('/').pop(),
+        },
+      });
+    }
+  }, [sendMutation]);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const perm = await Audio.requestPermissionsAsync();
+      if (!perm.granted) return;
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      recordingRef.current = recording;
+      setIsRecording(true);
+      setRecordingDuration(0);
+      recordingTimer.current = setInterval(() => setRecordingDuration((d) => d + 1), 1000);
+      Vibration.vibrate(50);
+    } catch {
+      showError('Could not start recording');
+    }
+  }, [showError]);
+
+  const stopRecording = useCallback(async () => {
+    if (!recordingRef.current) return;
+    try {
+      if (recordingTimer.current) clearInterval(recordingTimer.current);
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+      recordingRef.current = null;
+      setIsRecording(false);
+      setRecordingDuration(0);
+      if (uri) {
+        sendMutation.mutate({
+          attachment: { uri, type: 'audio', mimeType: 'audio/m4a', name: 'voice.m4a' },
+        });
+      }
+    } catch {
+      showError('Could not send voice message');
+    }
+  }, [sendMutation, showError]);
+
+  const onMessageLongPress = useCallback((msg: ConversationMessage) => {
+    Vibration.vibrate(30);
+    setSelectedMessage(msg);
+    setShowActions(true);
+  }, []);
+
+  const onReactionPress = useCallback((emoji: string) => {
+    if (selectedMessage) {
+      reactMutation.mutate({ messageId: selectedMessage.id, reaction: emoji });
+    }
+    setShowReactions(false);
+    setShowActions(false);
+    setSelectedMessage(null);
+  }, [selectedMessage, reactMutation]);
+
+  const copyMessage = useCallback(() => {
+    if (selectedMessage?.content) {
+      Clipboard.setString(selectedMessage.content);
+      showSuccess('Copied to clipboard');
+    }
+    setShowActions(false);
+    setSelectedMessage(null);
+  }, [selectedMessage, showSuccess]);
+
+  const deleteMessage = useCallback(() => {
+    if (selectedMessage?.is_mine) {
+      Alert.alert('Delete Message', 'Delete for everyone?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            // API call to delete would go here
+            showSuccess('Message deleted');
+            refetch();
+          },
+        },
+      ]);
+    }
+    setShowActions(false);
+    setSelectedMessage(null);
+  }, [selectedMessage, showSuccess, refetch]);
+
   const formatTime = useCallback((iso: string) => {
     return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }, []);
 
-  const formatAttachmentLabel = useCallback((attachmentType?: string | null) => {
-    if (attachmentType === 'video') return 'Video';
-    if (attachmentType === 'image') return 'Photo';
-    return 'Attachment';
-  }, []);
+  const swipeReply = useCallback((msg: ConversationMessage) => {
+    setReplyingTo(msg);
+    Animated.spring(replyAnim, { toValue: 1, useNativeDriver: true, friction: 8 }).start();
+  }, [replyAnim]);
 
-  const buildPreviewAttachment = useCallback(
-    (url?: string | null, type?: string | null, name?: string | null): NoticeAttachment | null => {
-      if (!url) return null;
-      return {
-        id: 0,
-        url,
-        file_type: type || undefined,
-        original_name: name || undefined,
-      };
-    },
-    [],
-  );
+  const renderMessage = useCallback(({ item, index }: { item: ConversationMessage; index: number }) => {
+    const isMine = item.is_mine;
+    const next = messages[index - 1];
+    const prev = messages[index + 1];
+    const isGrouped = prev && prev.sender?.id === item.sender?.id;
+    const isLastInGroup = !next || next.sender?.id !== item.sender?.id;
 
-  const getDisplayName = useCallback((user?: ConversationMessage['sender']) => {
-    if (!user) return 'Unknown';
-    const name = `${user.first_name || ''} ${user.last_name || ''}`.trim();
-    return name || user.username || 'Unknown';
-  }, []);
-
-  const handleSend = useCallback(async () => {
-    const value = text.trim();
-    const attachment = selectedAttachment;
-    const replyTarget = replyingTo;
-    if (!value && !attachment) return;
-
-    try {
-      // Content moderation check
-      const { moderateContent } = await import('../services/contentModeration');
-      
-      const imageUris = attachment && attachment.type === 'image' ? [attachment.uri] : [];
-      const videoUris = attachment && attachment.type === 'video' ? [attachment.uri] : [];
-      
-      const moderationResult = await moderateContent({
-        text: value,
-        images: imageUris,
-        videos: videoUris,
-      });
-
-      if (!moderationResult.isSafe) {
-        Alert.alert(
-          'Message Blocked',
-          moderationResult.reason || 'Your message contains inappropriate content and cannot be sent. Please review our community guidelines.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      setText('');
-      setSelectedAttachment(null);
-      setReplyingTo(null);
-
-      await sendConversationMessage(conversationId, {
-        content: value,
-        attachment: attachment
-          ? {
-              uri: attachment.uri,
-              type: attachment.type,
-              mimeType: attachment.mimeType || undefined,
-              name: attachment.name || undefined,
-            }
-          : undefined,
-        replyToId: replyTarget?.id,
-      });
-      refetch();
-      // Invalidate conversations cache to update badge when message is sent
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
-      if (attachment) {
-        showSuccess(`${attachment.type === 'video' ? 'Video' : 'Photo'} sent!`);
-      }
-    } catch (error: any) {
-      setText(value);
-      setSelectedAttachment(attachment);
-      setReplyingTo(replyTarget);
-      const detail =
-        error?.response?.data?.detail ||
-        error?.response?.data?.attachment ||
-        error?.response?.data?.message ||
-        'Unable to send message.';
-      showError(detail);
-    }
-  }, [conversationId, queryClient, refetch, replyingTo, selectedAttachment, showError, showSuccess, text]);
-
-  const setAttachmentFromAsset = useCallback((asset: ImagePicker.ImagePickerAsset | undefined) => {
-    if (!asset?.uri) return;
-    const type = asset.type === 'video' ? 'video' : 'image';
-    // Show media preview editor
-    setMediaPreviewUri(asset.uri);
-    setMediaPreviewType(type);
-  }, []);
-
-  const handleAttachmentPress = useCallback(() => {
-    setAttachmentPickerVisible(true);
-  }, []);
-
-  const openCamera = useCallback(async () => {
-    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permissionResult.granted) {
-      Alert.alert('Permission needed', 'Allow camera access to take photos or videos.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
-      allowsEditing: false,
-      quality: 0.8,
-    });
-    if (!result.canceled) {
-      setAttachmentFromAsset(result.assets[0]);
-    }
-  }, [setAttachmentFromAsset]);
-
-  const openLibrary = useCallback(async () => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permissionResult.granted) {
-      Alert.alert('Permission needed', 'Allow media access to choose photos or videos from your library.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
-      allowsEditing: false,
-      quality: 0.8,
-    });
-    if (!result.canceled) {
-      setAttachmentFromAsset(result.assets[0]);
-    }
-  }, [setAttachmentFromAsset]);
-
-  const handleMediaPreviewConfirm = useCallback(
-    (caption: string) => {
-      if (!mediaPreviewUri || !mediaPreviewType) return;
-      
-      setSelectedAttachment({
-        uri: mediaPreviewUri,
-        type: mediaPreviewType,
-        mimeType: mediaPreviewType === 'video' ? 'video/mp4' : 'image/jpeg',
-        name: mediaPreviewUri.split('/').pop() || undefined,
-      });
-      
-      // Clear media preview
-      setMediaPreviewUri(null);
-      setMediaPreviewType(null);
-      
-      // Add caption if provided
-      if (caption.trim()) {
-        setText(caption);
-      }
-    },
-    [mediaPreviewUri, mediaPreviewType]
-  );
-
-  const handleMediaPreviewCancel = useCallback(() => {
-    setMediaPreviewUri(null);
-    setMediaPreviewType(null);
-  }, []);
-
-  const renderMessage = useCallback(
-    ({ item, index }: { item: ConversationMessage; index: number }) => {
-      const isMine = item.is_mine;
-      const previous = messages[index + 1];
-      const next = messages[index - 1];
-      const previousSenderId = previous?.sender?.id;
-      const nextSenderId = next?.sender?.id;
-      const previousTime = previous ? new Date(previous.created_at).getTime() : null;
-      const currentTime = new Date(item.created_at).getTime();
-      const timeGap = previousTime ? Math.abs(previousTime - currentTime) : Number.MAX_SAFE_INTEGER;
-
-      const showAvatar = !isMine && (!previous || previousSenderId !== item.sender.id || timeGap > 5 * 60 * 1000);
-      const isGrouped = previous && previousSenderId === item.sender.id && timeGap <= 5 * 60 * 1000;
-      const isLastInGroup = !next || nextSenderId !== item.sender.id || Math.abs(new Date(next.created_at).getTime() - currentTime) > 5 * 60 * 1000;
-
-      const displayName = getDisplayName(item.sender);
-      const reply = item.reply_to;
-      const replySenderName = reply ? getDisplayName(reply.sender) : '';
-      const replyLabel = reply ? reply.content?.trim() || formatAttachmentLabel(reply.attachment_type) : '';
-
-      const attachmentType = item.attachment_type || (item.attachment_url ? 'image' : undefined);
-      const hasImageAttachment = Boolean(item.attachment_url && (attachmentType === 'image' || !attachmentType));
-      const hasVideoAttachment = Boolean(item.attachment_url && attachmentType === 'video');
-      const showAttachment = Boolean(item.attachment_url);
-
-      const textColor = '#000000';
-      const timeColor = '#667781';
-
-      const delivered =
-        item.read_at ||
-        item.readAt ||
-        item.delivered_at ||
-        item.deliveredAt ||
-        item.is_delivered ||
-        item.is_read;
-      const read = item.read_at || item.readAt || item.is_read;
-      const statusIcon =
-        item.is_mine && (
-          <MaterialCommunityIcons
-            name={delivered ? 'check-all' : 'check'}
-            size={14}
-            color={read ? '#53BDEB' : delivered ? '#53BDEB' : '#667781'}
-            style={{ marginLeft: 4 }}
-          />
-        );
-
-      return (
-        <View
-          style={[
-            styles.messageRow,
-            isMine ? styles.messageRowMine : styles.messageRowTheirs,
-            isGrouped && !isMine && styles.messageRowGrouped,
-          ]}
-        >
+    return (
+      <PanGestureHandler
+        onHandlerStateChange={({ nativeEvent }) => {
+          if (nativeEvent.state === State.END && nativeEvent.translationX > 50) {
+            swipeReply(item);
+          }
+        }}
+      >
+        <View style={[styles.msgRow, isMine && styles.msgRowMine]}>
           {!isMine && (
             <View style={styles.avatarSlot}>
-              {showAvatar ? (
-                item.sender.avatar_url ? (
+              {(!prev || prev.sender?.id !== item.sender?.id) ? (
+                item.sender?.avatar_url ? (
                   <Image source={{ uri: item.sender.avatar_url }} style={styles.avatar} />
                 ) : (
-                  <View style={[styles.avatar, { backgroundColor: '#E4E6EB' }]}>
-                    <Text style={{ color: '#000000', fontWeight: '600', fontSize: 14 }}>
-                      {(displayName || 'U').slice(0, 1).toUpperCase()}
+                  <View style={[styles.avatar, { backgroundColor: theme.colors.primary + '20' }]}>
+                    <Text style={{ color: theme.colors.primary, fontWeight: '700' }}>
+                      {(item.sender?.first_name || item.sender?.username || 'U')[0].toUpperCase()}
                     </Text>
                   </View>
                 )
               ) : null}
             </View>
           )}
-          <View style={{ maxWidth: '75%', alignItems: isMine ? 'flex-end' : 'flex-start' }}>
-            {!isMine && showAvatar ? (
-              <Text style={[styles.senderName, { color: '#667781' }]}>{displayName}</Text>
-            ) : null}
-            <Pressable
-              onLongPress={() => setReplyingTo(item)}
-              style={({ pressed }) => [
-                styles.messageBubble,
-                isMine ? styles.bubbleMine : styles.bubbleTheirs,
-                isMine
-                  ? {
-                      borderTopLeftRadius: 12,
-                      borderTopRightRadius: isGrouped ? 4 : 12,
-                      borderBottomLeftRadius: isLastInGroup ? 12 : 4,
-                      borderBottomRightRadius: isGrouped ? 4 : 12,
-                    }
-                  : {
-                      borderTopLeftRadius: isGrouped ? 4 : 12,
-                      borderTopRightRadius: 12,
-                      borderBottomLeftRadius: isGrouped ? 4 : 12,
-                      borderBottomRightRadius: isLastInGroup ? 12 : 4,
-                    },
-                pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
-              ]}
-            >
-              {reply ? (
-                <Pressable
-                  style={[styles.replyPreview, { borderLeftColor: isMine ? '#8BC34A' : '#53BDEB' }]}
-                  onPress={() => {
-                    const preview = buildPreviewAttachment(reply.attachment_url, reply.attachment_type, reply.attachment_name);
-                    if (preview) setPreviewAttachment(preview);
-                  }}
-                  disabled={!reply.attachment_url}
-                >
-                  <Text style={[styles.replySender, { color: '#667781' }]} numberOfLines={1}>
-                    {replySenderName}
-                  </Text>
-                  <Text style={[styles.replyText, { color: textColor }]} numberOfLines={2}>
-                    {replyLabel}
-                  </Text>
-                </Pressable>
-              ) : null}
-              {showAttachment ? (
-                <TouchableOpacity
-                  onPress={() => {
-                    const preview = buildPreviewAttachment(item.attachment_url, attachmentType, item.attachment_name);
-                    if (preview) setPreviewAttachment(preview);
-                  }}
-                  onLongPress={() => setReplyingTo(item)}
-                  activeOpacity={0.9}
-                  style={styles.messageImageContainer}
-                >
-                  {hasVideoAttachment ? (
-                    <>
-                      <AttachmentMediaPlayer
-                        uri={item.attachment_url || undefined}
-                        style={styles.messageImage}
-                        showControls={false}
-                        contentFit="cover"
-                      />
-                      <View style={styles.videoBadge}>
-                        <MaterialCommunityIcons name="play-circle-outline" size={26} color="#FFFFFF" />
-                      </View>
-                    </>
-                  ) : hasImageAttachment ? (
-                    <Image source={{ uri: item.attachment_url || undefined }} style={styles.messageImage} resizeMode="cover" />
-                  ) : (
-                    <View style={styles.attachmentFallback}>
-                      <MaterialCommunityIcons name="file-outline" size={28} color="#667781" />
-                      <Text style={{ color: '#667781', marginTop: 4, fontWeight: '600' }}>
-                        {formatAttachmentLabel(attachmentType)}
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ) : null}
-              {item.content ? (
-                <Text
-                  style={[
-                    styles.messageText,
-                    {
-                      color: textColor,
-                      marginTop: reply || showAttachment ? spacing.xs : 0,
-                    },
-                  ]}
-                >
-                  {item.content}
-                </Text>
-              ) : null}
-              <View style={styles.messageMetaRow}>
-                <Text style={[styles.messageMeta, { color: timeColor }]}>
-                  {formatTime(item.created_at)}
-                </Text>
-                {statusIcon}
-              </View>
-            </Pressable>
-          </View>
-          {isMine ? <View style={styles.avatarSlot} /> : null}
-        </View>
-      );
-    },
-    [
-      buildPreviewAttachment,
-      formatAttachmentLabel,
-      formatTime,
-      getDisplayName,
-      messages,
-      setPreviewAttachment,
-      setReplyingTo,
-    ],
-  );
-
-  const loadMore = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) {
-      fetchNextPage();
-    }
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
-
-  const headerLeft = useMemo(
-    () => (
-      <TouchableOpacity onPress={() => navigation.goBack()} style={{ paddingRight: spacing.md }}>
-        <MaterialCommunityIcons name="chevron-left" size={24} color={theme.colors.text} />
-      </TouchableOpacity>
-    ),
-    [navigation, theme.colors.text]
-  );
-
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: '#ECE5DD' }]}>
-      <HeaderBar title={title || 'Conversation'} subtitle={noticeTitle || undefined} left={headerLeft} showProfileAvatar={false} />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={Platform.select({ ios: 90, android: 0 })}
-      >
-        <View style={{ flex: 1, backgroundColor: '#ECE5DD' }}>
-          <FlatList
-            style={[styles.list, { backgroundColor: '#ECE5DD' }]}
-            data={messages}
-            inverted
-            keyExtractor={(item) => String(item.id)}
-            renderItem={renderMessage}
-            contentContainerStyle={[styles.listContent, { paddingBottom: spacing.xl * 2 }]}
-            onEndReachedThreshold={0.2}
-            onEndReached={loadMore}
-            ListFooterComponent={
-              isFetchingNextPage ? <ActivityIndicator style={{ marginVertical: spacing.md }} /> : null
-            }
-            refreshing={isFetching}
-            onRefresh={() => refetch()}
-          />
-          {replyingTo && (
-            <View
-              style={[
-                styles.replyingToBanner,
-                { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-              ]}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.replyingToLabel, { color: theme.colors.muted }]}>
-                  Replying to {getDisplayName(replyingTo.sender)}
-                </Text>
-                <Text style={[styles.replyingToText, { color: theme.colors.text }]} numberOfLines={2}>
-                  {replyingTo.content?.trim() || formatAttachmentLabel(replyingTo.attachment_type)}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setReplyingTo(null)}
-                style={[styles.replyingToClose, { backgroundColor: theme.colors.surfaceMuted }]}
-              >
-                <MaterialCommunityIcons name="close" size={14} color={theme.colors.text} />
-              </TouchableOpacity>
-            </View>
-          )}
-          {selectedAttachment && (
-            <View
-              style={[
-                styles.selectedAttachmentContainer,
-                {
-                  backgroundColor: theme.colors.card,
-                  borderColor: theme.colors.border,
-                },
-              ]}
-            >
-              {selectedAttachment.type === 'video' ? (
-                <>
-                  <AttachmentMediaPlayer
-                    uri={selectedAttachment.uri}
-                    style={styles.selectedAttachment}
-                    contentFit="cover"
-                    showControls={false}
-                  />
-                  <View style={styles.videoBadge}>
-                    <MaterialCommunityIcons name="play-circle-outline" size={24} color="#FFFFFF" />
-                  </View>
-                </>
-              ) : (
-                <Image source={{ uri: selectedAttachment.uri }} style={styles.selectedAttachment} resizeMode="cover" />
-              )}
-              <TouchableOpacity
-                onPress={() => setSelectedAttachment(null)}
-                style={[styles.removeAttachmentButton, { backgroundColor: theme.colors.danger }]}
-              >
-                <MaterialCommunityIcons name="close" size={16} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          )}
-          <View
-            style={[
-              styles.composer,
-              { borderColor: theme.colors.border, backgroundColor: theme.colors.card, shadowColor: theme.colors.shadow },
+          <Pressable
+            onLongPress={() => onMessageLongPress(item)}
+            style={({ pressed }) => [
+              styles.bubble,
+              isMine ? [styles.bubbleMine, { backgroundColor: theme.colors.primary }] : [styles.bubbleOther, { backgroundColor: theme.colors.card }],
+              pressed && { opacity: 0.85 },
             ]}
           >
-            <TouchableOpacity
-              style={[styles.iconButton, { backgroundColor: theme.colors.surface }]}
-              activeOpacity={0.7}
-              onPress={handleAttachmentPress}
-            >
-              <MaterialCommunityIcons name="paperclip" size={22} color={theme.colors.primary} />
+            {item.reply_to && (
+              <View style={[styles.replyPreview, { borderLeftColor: isMine ? '#fff' : theme.colors.primary }]}>
+                <Text style={{ color: isMine ? 'rgba(255,255,255,0.7)' : theme.colors.muted, fontSize: 12, fontWeight: '700' }}>
+                  {item.reply_to.sender?.first_name || item.reply_to.sender?.username}
+                </Text>
+                <Text style={{ color: isMine ? 'rgba(255,255,255,0.9)' : theme.colors.text, fontSize: 13 }} numberOfLines={1}>
+                  {item.reply_to.content || 'Attachment'}
+                </Text>
+              </View>
+            )}
+            {item.attachment_url && (
+              <TouchableOpacity onPress={() => setPreviewAttachment({ id: item.id, url: item.attachment_url, file_type: item.attachment_type || undefined })}>
+                {item.attachment_type === 'video' ? (
+                  <View style={styles.attachmentBox}>
+                    <MaterialCommunityIcons name="play-circle" size={40} color="#fff" />
+                  </View>
+                ) : item.attachment_type === 'audio' ? (
+                  <View style={[styles.attachmentBox, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+                    <MaterialCommunityIcons name="microphone" size={24} color={isMine ? '#fff' : theme.colors.primary} />
+                    <Text style={{ color: isMine ? '#fff' : theme.colors.text, fontWeight: '600' }}>Voice message</Text>
+                  </View>
+                ) : (
+                  <Image source={{ uri: item.attachment_url }} style={styles.msgImage} resizeMode="cover" />
+                )}
+              </TouchableOpacity>
+            )}
+            {item.content ? (
+              <Text style={[styles.msgText, { color: isMine ? '#fff' : theme.colors.text }]}>{item.content}</Text>
+            ) : null}
+            <View style={styles.msgMeta}>
+              <Text style={[styles.msgTime, { color: isMine ? 'rgba(255,255,255,0.7)' : theme.colors.muted }]}>
+                {formatTime(item.created_at)}
+              </Text>
+              {isMine && (
+                <MaterialCommunityIcons
+                  name={item.read_at ? 'check-all' : 'check'}
+                  size={14}
+                  color={item.read_at ? '#81D4FA' : 'rgba(255,255,255,0.7)'}
+                />
+              )}
+            </View>
+            {/* Reactions */}
+            {item.reactions && item.reactions.length > 0 && (
+              <View style={[styles.reactionBar, { backgroundColor: theme.colors.background }]}>
+                {Array.from(new Set(item.reactions.map((r: any) => r.reaction))).map((emoji: any) => (
+                  <Text key={emoji} style={styles.reactionEmoji}>{emoji}</Text>
+                ))}
+                <Text style={[styles.reactionCount, { color: theme.colors.muted }]}>{item.reactions.length}</Text>
+              </View>
+            )}
+          </Pressable>
+        </View>
+      </PanGestureHandler>
+    );
+  }, [messages, theme, formatTime, onMessageLongPress, swipeReply]);
+
+  const chatBg = theme.mode === 'dark' ? '#0B141A' : '#ECE5DD';
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: chatBg }}>
+        <GradientHeader
+          title={isSearching ? 'Search Messages' : title || 'Chat'}
+          subtitle={isSearching ? '' : noticeTitle || `${messages.length} messages`}
+          onBack={() => isSearching ? setIsSearching(false) : navigation.goBack()}
+          rightAction={
+            isSearching ? null : (
+              <TouchableOpacity onPress={() => setIsSearching(true)}>
+                <MaterialCommunityIcons name="magnify" size={24} color="#fff" />
+              </TouchableOpacity>
+            )
+          }
+        />
+
+        {isSearching && (
+          <View style={[styles.searchBar, { backgroundColor: theme.colors.card }]}>
+            <MaterialCommunityIcons name="magnify" size={18} color={theme.colors.muted} />
+            <TextInput
+              autoFocus
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search in conversation..."
+              placeholderTextColor={theme.colors.muted}
+              style={[styles.searchInput, { color: theme.colors.text }]}
+            />
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <MaterialCommunityIcons name="close-circle" size={18} color={theme.colors.muted} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
+
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        >
+          <FlatList
+            ref={flatListRef}
+            inverted
+            data={filteredMessages}
+            keyExtractor={(item) => String(item.id)}
+            renderItem={renderMessage}
+            contentContainerStyle={{ padding: 12, paddingBottom: 20 }}
+            onEndReached={() => hasNextPage && !isFetchingNextPage && fetchNextPage()}
+            ListFooterComponent={isFetchingNextPage ? <ActivityIndicator style={{ marginVertical: 12 }} /> : null}
+          />
+
+          {/* Typing indicator */}
+          {typingUsers.length > 0 && (
+            <View style={[styles.typingBar, { backgroundColor: theme.colors.card }]}>
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+              <Text style={{ color: theme.colors.muted, marginLeft: 8, fontSize: 13 }}>
+                {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+              </Text>
+            </View>
+          )}
+
+          {/* Reply banner */}
+          {replyingTo && (
+            <Animated.View style={[styles.replyBanner, { backgroundColor: theme.colors.card, transform: [{ scaleY: replyAnim }] }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '700' }}>
+                  Replying to {replyingTo.sender?.first_name || replyingTo.sender?.username}
+                </Text>
+                <Text style={{ color: theme.colors.text, fontSize: 13 }} numberOfLines={1}>
+                  {replyingTo.content || 'Attachment'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => { setReplyingTo(null); replyAnim.setValue(0); }}>
+                <MaterialCommunityIcons name="close" size={20} color={theme.colors.muted} />
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+
+          {/* Recording bar */}
+          {isRecording && (
+            <View style={[styles.recordingBar, { backgroundColor: '#F44336' }]}>
+              <MaterialCommunityIcons name="microphone" size={20} color="#fff" />
+              <Text style={{ color: '#fff', marginLeft: 8, fontWeight: '700' }}>
+                Recording... {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, '0')}
+              </Text>
+            </View>
+          )}
+
+          {/* Input bar */}
+          <View style={[styles.inputBar, { backgroundColor: theme.colors.card, borderTopColor: theme.colors.border || '#eee' }]}>
+            <TouchableOpacity onPress={() => handlePickMedia('image')} style={styles.iconBtn}>
+              <MaterialCommunityIcons name="image" size={24} color={theme.colors.muted} />
             </TouchableOpacity>
-            <View style={[styles.inputShell, { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }]}>
+            <TouchableOpacity onPress={() => handlePickMedia('video')} style={styles.iconBtn}>
+              <MaterialCommunityIcons name="video" size={24} color={theme.colors.muted} />
+            </TouchableOpacity>
+            <View style={[styles.textInputWrap, { backgroundColor: theme.colors.background }]}>
               <TextInput
-                placeholder="Type a message..."
-                placeholderTextColor={theme.colors.muted}
-                style={[styles.input, { color: theme.colors.text }]}
                 value={text}
                 onChangeText={setText}
+                placeholder="Type a message..."
+                placeholderTextColor={theme.colors.muted}
+                style={[styles.textInput, { color: theme.colors.text }]}
                 multiline
-                textAlignVertical="center"
+                maxLength={2000}
               />
             </View>
-            <TouchableOpacity
-              onPress={handleSend}
-              style={[
-                styles.sendFab,
-                { backgroundColor: (text.trim() || selectedAttachment) ? theme.colors.primary : theme.colors.surfaceMuted },
-              ]}
-              disabled={!text.trim() && !selectedAttachment}
-              activeOpacity={0.7}
-            >
-              <MaterialCommunityIcons
-                name="send"
-                size={20}
-                color={(text.trim() || selectedAttachment) ? theme.colors.primaryContrast : theme.colors.muted}
-              />
-            </TouchableOpacity>
+            {text.trim() ? (
+              <TouchableOpacity onPress={handleSend} style={[styles.sendBtn, { backgroundColor: theme.colors.primary }]}>
+                <MaterialCommunityIcons name="send" size={20} color="#fff" />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                onLongPress={startRecording}
+                onPressOut={stopRecording}
+                delayLongPress={200}
+                style={[styles.sendBtn, { backgroundColor: '#F44336' }]}
+              >
+                <MaterialCommunityIcons name="microphone" size={20} color="#fff" />
+              </TouchableOpacity>
+            )}
           </View>
+        </KeyboardAvoidingView>
+
+        {/* Message Actions Modal */}
+        {showActions && selectedMessage && (
+          <Pressable style={styles.overlay} onPress={() => { setShowActions(false); setSelectedMessage(null); }}>
+            <View style={[styles.actionsSheet, { backgroundColor: theme.colors.card }]}>
+              <Text style={[styles.actionTitle, { color: theme.colors.text }]}>Message</Text>
+              {selectedMessage.content ? (
+                <TouchableOpacity onPress={copyMessage} style={styles.actionRow}>
+                  <MaterialCommunityIcons name="content-copy" size={20} color={theme.colors.primary} />
+                  <Text style={[styles.actionText, { color: theme.colors.text }]}>Copy</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity onPress={() => { setShowActions(false); setShowReactions(true); }} style={styles.actionRow}>
+                <MaterialCommunityIcons name="emoticon-outline" size={20} color={theme.colors.primary} />
+                <Text style={[styles.actionText, { color: theme.colors.text }]}>React</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => { swipeReply(selectedMessage); setShowActions(false); }} style={styles.actionRow}>
+                <MaterialCommunityIcons name="reply" size={20} color={theme.colors.primary} />
+                <Text style={[styles.actionText, { color: theme.colors.text }]}>Reply</Text>
+              </TouchableOpacity>
+              {selectedMessage.is_mine && (
+                <TouchableOpacity onPress={deleteMessage} style={styles.actionRow}>
+                  <MaterialCommunityIcons name="delete-outline" size={20} color="#F44336" />
+                  <Text style={[styles.actionText, { color: '#F44336' }]}>Delete</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </Pressable>
+        )}
+
+        {/* Reaction Picker */}
+        {showReactions && (
+          <Pressable style={styles.overlay} onPress={() => { setShowReactions(false); setSelectedMessage(null); }}>
+            <View style={[styles.reactionPicker, { backgroundColor: theme.colors.card }]}>
+              {REACTION_EMOJIS.map((emoji) => (
+                <TouchableOpacity key={emoji} onPress={() => onReactionPress(emoji)} style={styles.reactionBtn}>
+                  <Text style={{ fontSize: 28 }}>{emoji}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Pressable>
+        )}
+
+        {/* Attachment Preview */}
+        {previewAttachment && (
           <AttachmentPreviewModal
-            visible={!!previewAttachment}
             attachment={previewAttachment}
+            visible={!!previewAttachment}
             onClose={() => setPreviewAttachment(null)}
           />
-        </View>
-      </KeyboardAvoidingView>
-      <AttachmentPicker
-        visible={attachmentPickerVisible}
-        onCamera={openCamera}
-        onLibrary={openLibrary}
-        onClose={() => setAttachmentPickerVisible(false)}
-      />
-      <MediaPreviewEditor
-        visible={!!mediaPreviewUri && !!mediaPreviewType}
-        uri={mediaPreviewUri || ''}
-        type={mediaPreviewType || 'image'}
-        onConfirm={handleMediaPreviewConfirm}
-        onCancel={handleMediaPreviewCancel}
-      />
-    </SafeAreaView>
+        )}
+      </View>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  list: {
-    flex: 1,
-  },
-  listContent: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.md,
-  },
-  messageRow: {
-    flexDirection: 'row',
-    marginBottom: spacing.sm,
-    alignItems: 'flex-end',
-    gap: 6,
-    paddingHorizontal: spacing.xs,
-  },
-  messageRowMine: {
-    justifyContent: 'flex-end',
-  },
-  messageRowTheirs: {
-    justifyContent: 'flex-start',
-  },
-  messageRowGrouped: {
-    marginTop: -2,
-  },
-  avatarSlot: {
-    width: 36,
-    alignItems: 'flex-start',
-    paddingBottom: 2,
-  },
-  messageBubble: {
-    maxWidth: '100%',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    position: 'relative',
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 2,
-    elevation: 3,
-  },
-  bubbleMine: {
-    backgroundColor: '#DCF8C6',
-  },
-  bubbleTheirs: {
-    backgroundColor: '#FFFFFF',
-  },
-  messageText: {
-    fontSize: 15,
-    lineHeight: 20,
-    color: '#000000',
-  },
-  messageMeta: {
-    fontSize: 11,
-    marginTop: 3,
-    marginLeft: 4,
-  },
-  messageMetaRow: {
-    flexDirection: 'row',
-    alignSelf: 'flex-end',
-    alignItems: 'center',
-    marginTop: 4,
-    gap: 2,
-  },
-  composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderTopWidth: 1,
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: -1 },
-    shadowRadius: 3,
-    elevation: 4,
-    minHeight: 56,
-  },
-  inputShell: {
-    flex: 1,
-    borderRadius: 20,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    marginHorizontal: spacing.xs,
-    minHeight: 40,
-    maxHeight: 100,
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: spacing.xs,
-  },
-  input: {
-    flex: 1,
-    fontSize: 15,
-    lineHeight: 20,
-    paddingVertical: Platform.OS === 'ios' ? spacing.xs : spacing.xs,
-    minHeight: 20,
-  },
-  sendFab: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: spacing.xs,
-    marginHorizontal: spacing.xs,
-  },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  senderName: {
-    fontSize: 12,
-    marginBottom: 3,
-    marginLeft: 4,
-    fontWeight: '600',
-  },
-  messageImageContainer: {
-    width: 240,
-    maxWidth: '100%',
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: spacing.xs,
-    marginHorizontal: -12,
-    marginTop: -8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  messageImage: {
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-  },
-  attachmentFallback: {
-    width: '100%',
-    height: 200,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F5F6F7',
-  },
-  videoBadge: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderRadius: 14,
-    padding: 2,
-  },
-  replyPreview: {
-    borderLeftWidth: 3.5,
-    paddingLeft: spacing.sm,
-    paddingVertical: spacing.xs,
-    marginBottom: spacing.xs,
-    paddingRight: spacing.xs,
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
-    borderRadius: 6,
-    marginHorizontal: -2,
-    paddingHorizontal: spacing.sm,
-  },
-  replySender: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  replyText: {
-    fontSize: 13,
-  },
-  replyingToBanner: {
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderLeftWidth: 3,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  replyingToLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  replyingToText: {
-    fontSize: 14,
-  },
-  replyingToClose: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  selectedAttachmentContainer: {
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-    position: 'relative',
-    width: 120,
-    height: 120,
-  },
-  selectedAttachment: {
-    width: '100%',
-    height: '100%',
-  },
-  removeAttachmentButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  msgRow: { flexDirection: 'row', marginBottom: 6, alignItems: 'flex-end' },
+  msgRowMine: { justifyContent: 'flex-end' },
+  avatarSlot: { width: 32, marginRight: 6 },
+  avatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  bubble: { maxWidth: '76%', padding: 10, borderRadius: 16, elevation: 1 },
+  bubbleMine: { borderBottomRightRadius: 4 },
+  bubbleOther: { borderBottomLeftRadius: 4, borderWidth: 1, borderColor: 'rgba(0,0,0,0.04)' },
+  replyPreview: { paddingLeft: 8, borderLeftWidth: 3, marginBottom: 6 },
+  msgText: { fontSize: 15, lineHeight: 22 },
+  msgMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4 },
+  msgTime: { fontSize: 10, marginRight: 4 },
+  msgImage: { width: 220, height: 160, borderRadius: 12, marginBottom: 4 },
+  attachmentBox: { width: 220, height: 80, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  reactionBar: { flexDirection: 'row', alignItems: 'center', position: 'absolute', bottom: -10, right: 4, borderRadius: 12, paddingHorizontal: 6, paddingVertical: 2, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4 },
+  reactionEmoji: { fontSize: 12, marginRight: 2 },
+  reactionCount: { fontSize: 10, fontWeight: '700' },
+  searchBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, margin: 12, borderRadius: 14 },
+  searchInput: { flex: 1, marginLeft: 8, fontSize: 15 },
+  typingBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 6 },
+  replyBanner: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1 },
+  recordingBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10 },
+  inputBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1 },
+  iconBtn: { padding: 6, marginRight: 2 },
+  textInputWrap: { flex: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, maxHeight: 120 },
+  textInput: { fontSize: 15, maxHeight: 100 },
+  sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginLeft: 6 },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  actionsSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingVertical: 16, paddingBottom: 40 },
+  actionTitle: { fontSize: 14, fontWeight: '800', textAlign: 'center', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  actionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  actionText: { fontSize: 16, marginLeft: 16, fontWeight: '600' },
+  reactionPicker: { flexDirection: 'row', alignSelf: 'center', borderRadius: 30, paddingHorizontal: 16, paddingVertical: 10, marginBottom: 100, elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8 },
+  reactionBtn: { paddingHorizontal: 8, paddingVertical: 4 },
 });

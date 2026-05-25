@@ -339,3 +339,52 @@ class NoticeArchive(models.Model):
 
     class Meta:
         ordering = ["-archived_at"]
+
+
+class NoticeApproval(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        ESCALATED = "escalated", "Escalated"
+
+    notice = models.OneToOneField(
+        Notice,
+        on_delete=models.CASCADE,
+        related_name="approval",
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="submitted_approvals",
+    )
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    current_reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pending_approvals",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_notices",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rejected_notices",
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    escalation_chain = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["-submitted_at"]

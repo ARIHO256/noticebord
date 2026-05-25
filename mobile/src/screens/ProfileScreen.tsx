@@ -9,79 +9,49 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
+  Switch,
 } from 'react-native';
-import PrimaryButton from '../components/PrimaryButton';
-import { api } from '../api/client';
-import * as ImagePicker from 'expo-image-picker';
-import { useTheme } from '../context/ThemeContext';
-import FormTextInput from '../components/FormTextInput';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../App';
-import Card from '../components/Card';
-import ScreenContainer from '../components/ScreenContainer';
-import SectionHeading from '../components/SectionHeading';
-import { spacing } from '../theme';
-import { AuthContext } from '../context/AuthContext';
-import ImagePreviewModal from '../components/ImagePreviewModal';
+import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useQueryClient } from '@tanstack/react-query';
+import { api } from '../api/client';
+import { useTheme } from '../context/ThemeContext';
+import { AuthContext } from '../context/AuthContext';
 import { useCurrentUserProfile } from '../hooks/useCurrentUserProfile';
+import { useQueryClient } from '@tanstack/react-query';
+import BeautifulButton from '../components/BeautifulButton';
+import ModernCard from '../components/ModernCard';
+import type { RootStackParamList } from '../App';
 
-type Profile = {
-  id: number;
-  username: string;
-  email?: string;
-  first_name?: string | null;
-  last_name?: string | null;
-  is_faculty?: boolean;
-  is_staff?: boolean;
-  is_superuser?: boolean;
-  department?: string | null;
-  designation?: string | null;
-  phone?: string | null;
-  avatar_url?: string | null;
-  school?: string | null;
-  course?: string | null;
-  academic_year?: string | null;
+const DESIGNATION_ICONS: Record<string, string> = {
+  vice_chancellor: 'crown',
+  registrar: 'file-document',
+  dean: 'school',
+  hod: 'account-tie',
+  lecturer: 'teach',
+  student: 'account',
+  security: 'shield',
+  business_office: 'cash-register',
+  other: 'account',
 };
 
 export default function ProfileScreen() {
   const { theme, setMode, mode } = useTheme();
   const { signOut } = useContext(AuthContext);
   const queryClient = useQueryClient();
-  const profileQuery = useCurrentUserProfile();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [previewVisible, setPreviewVisible] = useState(false);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const profileLoading = profileQuery.isLoading && !profileQuery.data;
-  const profileErrorMessage =
-    profileQuery.error && (profileQuery.error as any)?.userMessage
-      ? (profileQuery.error as any).userMessage
-      : profileQuery.error && (profileQuery.error as any)?.message
-      ? (profileQuery.error as any).message
-      : null;
+  const profileQuery = useCurrentUserProfile();
+
+  const [profile, setProfile] = useState<any>(null);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
-    if (profileQuery.data) {
-      setProfile(profileQuery.data as Profile);
-    }
+    if (profileQuery.data) setProfile(profileQuery.data);
   }, [profileQuery.data]);
-
-  const onSave = async () => {
-    if (!profile) return;
-    const { id, ...rest } = profile;
-    const resp = await api.put(`/users/profiles/${id}/`, rest);
-    const updated = resp.data;
-    setProfile(updated);
-    queryClient.setQueryData(['current-user-profile'], updated);
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'Home' }],
-    });
-  };
 
   const onPickAvatar = async () => {
     if (!profile) return;
@@ -94,296 +64,248 @@ export default function ProfileScreen() {
       const form = new FormData();
       form.append('avatar', { uri: res.assets[0].uri, name: 'avatar.jpg', type: 'image/jpeg' } as any);
       const resp = await api.put(`/users/profiles/${profile.id}/`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
-      const updated = resp.data;
-      setProfile(updated);
-      queryClient.setQueryData(['current-user-profile'], updated);
-    } catch (e) {
+      setProfile(resp.data);
+      queryClient.setQueryData(['current-user-profile'], resp.data);
+    } catch {
       Alert.alert('Upload failed', 'Could not upload avatar');
     } finally {
       setUploading(false);
     }
   };
 
-  if (profileLoading && !profile) {
+  const onPickCover = async () => {
+    if (!profile) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (perm.status !== 'granted') return;
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    if (res.canceled) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append('cover_photo', { uri: res.assets[0].uri, name: 'cover.jpg', type: 'image/jpeg' } as any);
+      const resp = await api.put(`/users/profiles/${profile.id}/`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setProfile(resp.data);
+      queryClient.setQueryData(['current-user-profile'], resp.data);
+    } catch {
+      Alert.alert('Upload failed', 'Could not upload cover photo');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const onSave = async () => {
+    if (!profile) return;
+    setSaving(true);
+    try {
+      const { id, avatar_url, cover_photo_url, ...payload } = profile;
+      const resp = await api.put(`/users/profiles/${id}/`, payload);
+      setProfile(resp.data);
+      queryClient.setQueryData(['current-user-profile'], resp.data);
+      setEditing(false);
+    } catch {
+      Alert.alert('Error', 'Failed to save profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleFieldChange = (field: string, value: string) => {
+    setProfile((p: any) => ({ ...p, [field]: value }));
+  };
+
+  if (profileQuery.isLoading && !profile) {
     return (
-      <ScreenContainer title="My Profile" padded={false}>
-        <View style={styles.centeredState}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-          <Text style={[styles.stateText, { color: theme.colors.muted }]}>Loading profile…</Text>
-        </View>
-      </ScreenContainer>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background }}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+      </View>
     );
   }
 
   if (!profile) {
     return (
-      <ScreenContainer title="My Profile" padded={false}>
-        <View style={styles.centeredState}>
-          <Text style={[styles.stateText, { color: theme.colors.text, textAlign: 'center' }]}>
-            {error || profileErrorMessage || 'Profile unavailable.'}
-          </Text>
-          <PrimaryButton title="Retry" onPress={() => profileQuery.refetch()} style={styles.retryButton} />
-        </View>
-      </ScreenContainer>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background }}>
+        <Text style={{ color: theme.colors.muted }}>Profile unavailable</Text>
+      </View>
     );
   }
 
-  const avatarUri = profile.avatar_url || 'https://via.placeholder.com/160x160.png?text=%20';
+  const designationIcon = DESIGNATION_ICONS[profile.designation] || 'account';
+  const displayName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.username;
 
   return (
-    <ScreenContainer
-      title="My Profile"
-      right={
-        <TouchableOpacity
-          onPress={() => setMode(mode === 'dark' ? 'light' : 'dark')}
-          style={styles.modeToggle}
-          activeOpacity={0.85}
-        >
-          <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 12 }}>
-            {mode === 'dark' ? 'Light mode' : 'Dark mode'}
-          </Text>
-        </TouchableOpacity>
-      }
-      padded={false}
-    >
+    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={profileQuery.isRefetching}
-            onRefresh={() => profileQuery.refetch()}
-            tintColor={theme.colors.primary}
-            colors={[theme.colors.primary]}
-          />
-        }
+        refreshControl={<RefreshControl refreshing={profileQuery.isRefetching} onRefresh={() => profileQuery.refetch()} />}
       >
-        <Card style={styles.heroCard}>
-          <TouchableOpacity onPress={() => setPreviewVisible(true)} activeOpacity={0.9}>
-            <Image source={{ uri: avatarUri }} style={styles.avatar} />
-          </TouchableOpacity>
-          <Text style={[styles.heroName, { color: theme.colors.text }]}>
-            {[profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.username}
-          </Text>
-          <Text style={{ color: theme.colors.muted }}>{profile.email}</Text>
-          <TouchableOpacity onPress={onPickAvatar} disabled={uploading} style={styles.changePhotoButton}>
-            <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>
-              {uploading ? 'Uploading avatar…' : 'Change photo'}
-            </Text>
-          </TouchableOpacity>
-        </Card>
-
-        <Card style={{ gap: spacing.md }}>
-          <SectionHeading title="Account overview" />
-          <InfoRow label="Username" value={profile.username} />
-          <InfoRow label="School" value={profile.school || 'Not set'} />
-          <InfoRow label="Course" value={profile.course || 'Not set'} />
-          <InfoRow label="Academic year" value={profile.academic_year || 'Not set'} />
-        </Card>
-
-        <Card style={{ gap: spacing.md }}>
-          <SectionHeading title="Edit details" />
-          <View style={styles.row}>
-            <FormTextInput
-              label="First name"
-              value={profile.first_name ?? ''}
-              onChangeText={(t) => setProfile({ ...profile, first_name: t })}
-              containerStyle={styles.half}
-            />
-            <FormTextInput
-              label="Last name"
-              value={profile.last_name ?? ''}
-              onChangeText={(t) => setProfile({ ...profile, last_name: t })}
-              containerStyle={styles.half}
-            />
-          </View>
-          <View style={styles.row}>
-            <FormTextInput
-              label="Department"
-              value={profile.department ?? ''}
-              onChangeText={(t) => setProfile({ ...profile, department: t })}
-              containerStyle={styles.half}
-            />
-            <FormTextInput
-              label="Designation"
-              value={profile.designation ?? ''}
-              onChangeText={(t) => setProfile({ ...profile, designation: t })}
-              containerStyle={styles.half}
-            />
-          </View>
-          <FormTextInput
-            label="Phone"
-            value={profile.phone ?? ''}
-            onChangeText={(t) => setProfile({ ...profile, phone: t })}
-            keyboardType="phone-pad"
+        {/* Cover Photo */}
+        <View style={styles.coverWrap}>
+          <Image
+            source={{ uri: profile.cover_photo_url || 'https://images.unsplash.com/photo-1541339907198-e08756dedf3f?w=800' }}
+            style={styles.coverImage}
           />
-          <PrimaryButton title="Save changes" onPress={onSave} />
-        </Card>
-        
-        <Card style={{ marginTop: spacing.lg }}>
-          <SectionHeading title="Settings" />
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Preferences')}
-            style={styles.menuItem}
-          >
-            <MaterialCommunityIcons name="cog-outline" size={24} color={theme.colors.primary} />
-            <Text style={[styles.menuItemText, { color: theme.colors.text }]}>Preferences</Text>
-            <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.muted} />
+          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.coverGradient} />
+          <TouchableOpacity onPress={onPickCover} style={styles.coverEditBtn}>
+            <MaterialCommunityIcons name="camera" size={18} color="#fff" />
           </TouchableOpacity>
-          {profile?.is_staff && (
-            <TouchableOpacity
-              onPress={() => navigation.navigate('Analytics')}
-              style={styles.menuItem}
-            >
-              <MaterialCommunityIcons name="chart-line" size={24} color={theme.colors.primary} />
-              <Text style={[styles.menuItemText, { color: theme.colors.text }]}>Analytics Dashboard</Text>
-              <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.muted} />
-            </TouchableOpacity>
-          )}
-        </Card>
+        </View>
 
-        {(profile?.is_staff || profile?.is_superuser) && (
-          <Card style={{ marginTop: spacing.lg }}>
-            <SectionHeading title="User Management" />
-            <TouchableOpacity
-              onPress={() => navigation.navigate('AdminUserList')}
-              style={styles.menuItem}
-            >
-              <MaterialCommunityIcons name="account-group" size={24} color={theme.colors.primary} />
-              <Text style={[styles.menuItemText, { color: theme.colors.text }]}>Manage Users</Text>
-              <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.muted} />
+        {/* Avatar & Name */}
+        <View style={styles.headerSection}>
+          <View style={styles.avatarWrap}>
+            <Image source={{ uri: profile.avatar_url || '' }} style={styles.avatar} />
+            <TouchableOpacity onPress={onPickAvatar} style={styles.avatarEdit}>
+              <MaterialCommunityIcons name="camera" size={14} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => navigation.navigate('AdminUserCreate')}
-              style={styles.menuItem}
-            >
-              <MaterialCommunityIcons name="account-plus" size={24} color={theme.colors.primary} />
-              <Text style={[styles.menuItemText, { color: theme.colors.text }]}>Create New User</Text>
-              <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.muted} />
-            </TouchableOpacity>
-          </Card>
-        )}
-        
-        <PrimaryButton title="Logout" onPress={signOut} style={{ marginTop: spacing.lg }} />
-      </ScrollView>
-      <ImagePreviewModal
-        visible={previewVisible}
-        uri={avatarUri}
-        onClose={() => setPreviewVisible(false)}
-        footer={
-          <TouchableOpacity
-            onPress={() => {
-              setPreviewVisible(false);
-              onPickAvatar();
-            }}
-            style={styles.previewChangeButton}
-          >
-            <Text style={{ color: '#fff', fontWeight: '600' }}>Change photo</Text>
+          </View>
+          <Text style={[styles.name, { color: theme.colors.text }]}>{displayName}</Text>
+          <View style={styles.badgeRow}>
+            <View style={[styles.badge, { backgroundColor: theme.colors.primary + '18' }]}>
+              <MaterialCommunityIcons name={designationIcon as any} size={14} color={theme.colors.primary} />
+              <Text style={[styles.badgeText, { color: theme.colors.primary }]}>
+                {(profile.designation || 'Member').replace(/_/g, ' ')}
+              </Text>
+            </View>
+            {profile.is_staff && (
+              <View style={[styles.badge, { backgroundColor: '#4CAF5018' }]}>
+                <MaterialCommunityIcons name="shield-check" size={14} color="#4CAF50" />
+                <Text style={[styles.badgeText, { color: '#4CAF50' }]}>Staff</Text>
+              </View>
+            )}
+          </View>
+          {profile.bio ? <Text style={[styles.bio, { color: theme.colors.muted }]}>{profile.bio}</Text> : null}
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity onPress={() => setEditing(!editing)} style={[styles.actionBtn, { backgroundColor: theme.colors.card }]}>
+            <MaterialCommunityIcons name={editing ? 'check' : 'pencil'} size={18} color={theme.colors.primary} />
+            <Text style={[styles.actionText, { color: theme.colors.primary }]}>{editing ? 'Done' : 'Edit'}</Text>
           </TouchableOpacity>
-        }
-      />
-    </ScreenContainer>
+          <TouchableOpacity onPress={() => navigation.navigate('Preferences')} style={[styles.actionBtn, { backgroundColor: theme.colors.card }]}>
+            <MaterialCommunityIcons name="cog" size={18} color={theme.colors.primary} />
+            <Text style={[styles.actionText, { color: theme.colors.primary }]}>Settings</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Info Cards */}
+        <ModernCard style={{ margin: 16, marginTop: 8 }}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Academic Info</Text>
+          <InfoRow icon="school" label="School" value={profile.school || 'Not set'} />
+          <InfoRow icon="domain" label="Department" value={profile.department || 'Not set'} />
+          <InfoRow icon="book-open-variant" label="Course" value={profile.course || 'Not set'} />
+          <InfoRow icon="calendar" label="Year" value={profile.academic_year || 'Not set'} />
+        </ModernCard>
+
+        {/* Contact & Social */}
+        <ModernCard style={{ margin: 16, marginTop: 0 }}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Contact</Text>
+          <InfoRow icon="email" label="Email" value={profile.email} />
+          <InfoRow icon="phone" label="Phone" value={profile.phone || 'Not set'} />
+          {profile.campus ? <InfoRow icon="map-marker" label="Campus" value={profile.campus} /> : null}
+        </ModernCard>
+
+        {/* Edit Form */}
+        {editing && (
+          <ModernCard style={{ margin: 16, marginTop: 0 }}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Edit Profile</Text>
+            <EditField label="First Name" value={profile.first_name || ''} onChange={(v) => handleFieldChange('first_name', v)} />
+            <EditField label="Last Name" value={profile.last_name || ''} onChange={(v) => handleFieldChange('last_name', v)} />
+            <EditField label="Bio" value={profile.bio || ''} onChange={(v) => handleFieldChange('bio', v)} multiline />
+            <EditField label="Phone" value={profile.phone || ''} onChange={(v) => handleFieldChange('phone', v)} />
+            <EditField label="LinkedIn URL" value={profile.linkedin_url || ''} onChange={(v) => handleFieldChange('linkedin_url', v)} />
+            <EditField label="Twitter URL" value={profile.twitter_url || ''} onChange={(v) => handleFieldChange('twitter_url', v)} />
+            <BeautifulButton title={saving ? 'Saving...' : 'Save Changes'} onPress={onSave} variant="gradient" disabled={saving} />
+          </ModernCard>
+        )}
+
+        {/* Stats */}
+        <ModernCard style={{ margin: 16, marginTop: 0 }}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Stats</Text>
+          <View style={styles.statsRow}>
+            <StatItem icon="file-document" label="Notices" value={profile.notice_count || 0} />
+            <StatItem icon="message-text" label="Messages" value={profile.message_count || 0} />
+            <StatItem icon="account-group" label="Friends" value={profile.friend_count || 0} />
+          </View>
+        </ModernCard>
+
+        {/* Danger Zone */}
+        <ModernCard style={{ margin: 16, marginTop: 0, borderColor: '#F4433618', borderWidth: 1 }}>
+          <BeautifulButton title="Sign Out" variant="danger" onPress={() => {
+            Alert.alert('Sign Out', 'Are you sure?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Sign Out', style: 'destructive', onPress: signOut },
+            ]);
+          }} />
+        </ModernCard>
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
+    </View>
   );
 }
 
-
-const styles = StyleSheet.create({
-  scrollContent: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
-    gap: spacing.lg,
-  },
-  heroCard: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-  },
-  avatar: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    marginBottom: spacing.md,
-  },
-  changePhotoButton: {
-    borderWidth: 1,
-    borderColor: '#4338CA',
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: 999,
-  },
-  previewChangeButton: {
-    borderWidth: 1,
-    borderColor: '#fff',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    borderRadius: 999,
-  },
-  heroName: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: spacing.xs,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  half: {
-    flex: 1,
-  },
-  modeToggle: {
-    paddingVertical: 6,
-    paddingHorizontal: spacing.md,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  centeredState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  stateText: {
-    marginTop: spacing.md,
-    fontSize: 16,
-  },
-  retryButton: {
-    marginTop: spacing.lg,
-    alignSelf: 'center',
-    minWidth: 160,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    gap: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(0,0,0,0.05)',
-  },
-  menuItemText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '500',
-  },
-});
-
-const InfoRow = ({ label, value }: { label: string; value?: string | null }) => {
+function InfoRow({ icon, label, value }: { icon: string; label: string; value: string }) {
   const { theme } = useTheme();
   return (
-    <View style={infoStyles.container}>
-      <Text style={[infoStyles.label, { color: theme.colors.muted }]}>{label}</Text>
-      <Text style={[infoStyles.value, { color: theme.colors.text }]}>{value || '—'}</Text>
+    <View style={styles.infoRow}>
+      <MaterialCommunityIcons name={icon as any} size={18} color={theme.colors.muted} />
+      <Text style={[styles.infoLabel, { color: theme.colors.muted }]}>{label}</Text>
+      <Text style={[styles.infoValue, { color: theme.colors.text }]} numberOfLines={1}>{value}</Text>
     </View>
   );
-};
+}
 
-const infoStyles = StyleSheet.create({
-  container: {
-    paddingVertical: 4,
-  },
-  label: {
-    fontSize: 12,
-    textTransform: 'uppercase',
-  },
-  value: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
+function EditField({ label, value, onChange, multiline }: { label: string; value: string; onChange: (v: string) => void; multiline?: boolean }) {
+  const { theme } = useTheme();
+  return (
+    <View style={{ marginBottom: 12 }}>
+      <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4, fontWeight: '600' }}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        multiline={multiline}
+        style={[styles.editInput, { color: theme.colors.text, backgroundColor: theme.colors.background, borderColor: theme.colors.border || '#eee' }]}
+        placeholderTextColor={theme.colors.muted}
+      />
+    </View>
+  );
+}
+
+function StatItem({ icon, label, value }: { icon: string; label: string; value: number }) {
+  const { theme } = useTheme();
+  return (
+    <View style={{ alignItems: 'center', flex: 1 }}>
+      <MaterialCommunityIcons name={icon as any} size={24} color={theme.colors.primary} />
+      <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800', marginTop: 4 }}>{value}</Text>
+      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{label}</Text>
+    </View>
+  );
+}
+
+const TextInput = ({ ...props }) => <TextInputNative {...props} />;
+import { TextInput as TextInputNative } from 'react-native';
+
+const styles = StyleSheet.create({
+  coverWrap: { height: 180, position: 'relative' },
+  coverImage: { width: '100%', height: '100%' },
+  coverGradient: { ...StyleSheet.absoluteFillObject },
+  coverEditBtn: { position: 'absolute', top: 16, right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  headerSection: { alignItems: 'center', marginTop: -50, paddingHorizontal: 20 },
+  avatarWrap: { position: 'relative' },
+  avatar: { width: 100, height: 100, borderRadius: 50, borderWidth: 4, borderColor: '#fff' },
+  avatarEdit: { position: 'absolute', bottom: 0, right: 0, width: 32, height: 32, borderRadius: 16, backgroundColor: '#1877F2', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
+  name: { fontSize: 24, fontWeight: '900', marginTop: 12 },
+  badgeRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  badgeText: { fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
+  bio: { fontSize: 14, textAlign: 'center', marginTop: 10, lineHeight: 22, paddingHorizontal: 20 },
+  actionRow: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginTop: 16, paddingHorizontal: 16 },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 4 },
+  actionText: { fontSize: 14, fontWeight: '700' },
+  sectionTitle: { fontSize: 16, fontWeight: '800', marginBottom: 12 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
+  infoLabel: { width: 100, fontSize: 13, marginLeft: 10 },
+  infoValue: { flex: 1, fontSize: 14, fontWeight: '600', textAlign: 'right' },
+  editInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16 },
 });

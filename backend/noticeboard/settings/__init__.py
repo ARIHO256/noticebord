@@ -76,4 +76,17 @@ def _validate_settings():
             raise RuntimeError("Production settings validation failed. Fix errors before starting.")
 
 
+# Configure caching
+from .caching import configure_caching
+configure_caching(globals())
+
+# Configure cloud storage
+from .storage import configure_storage
+configure_storage(globals())
+
+# Initialize Sentry error tracking
+from .sentry import init_sentry
+init_sentry()
+
+
 _validate_settings()

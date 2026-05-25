@@ -1,31 +1,30 @@
 import os
-
-# Load environment variables from .env file
-# Go up one level: noticeboard/ -> backend/
-_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_env_path = os.path.join(_base_dir, ".env")
-if os.path.exists(_env_path):
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(_env_path)
-    except ImportError:
-        pass
+from django.core.asgi import get_asgi_application
+from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.auth import AuthMiddlewareStack
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "noticeboard.settings")
 
-from django.core.asgi import get_asgi_application
-from channels.routing import ProtocolTypeRouter, URLRouter
-from noticeboard.ws_auth import JWTAuthMiddlewareStack
-
+# Initialize Django ASGI application early to ensure the AppRegistry
+# is populated before importing code that may import ORM models.
 django_asgi_app = get_asgi_application()
 
-from notifications import routing as notifications_routing  # noqa
+from django.urls import path
+from notifications.consumers import NotificationConsumer
+from messaging.consumers import ConversationConsumer
+from groups.consumers import GroupChatConsumer
+from events.consumers import EventLiveConsumer
+
+websocket_urlpatterns = [
+    path("ws/notifications/", NotificationConsumer.as_asgi()),
+    path("ws/conversations/<int:conversation_id>/", ConversationConsumer.as_asgi()),
+    path("ws/groups/<int:group_id>/", GroupChatConsumer.as_asgi()),
+    path("ws/events/<int:event_id>/", EventLiveConsumer.as_asgi()),
+]
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
-    "websocket": JWTAuthMiddlewareStack(
-        URLRouter(
-            notifications_routing.websocket_urlpatterns
-        )
+    "websocket": AuthMiddlewareStack(
+        URLRouter(websocket_urlpatterns)
     ),
 })

@@ -174,6 +174,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "audit.tasks.cleanup_expired_exports",
         "schedule": 86400.0,
     },
+    "send-daily-digests": {
+        "task": "notifications.digest_tasks.send_daily_digests",
+        "schedule": 86400.0,  # Once per day
+    },
+    "send-weekly-digests": {
+        "task": "notifications.digest_tasks.send_weekly_digests",
+        "schedule": 604800.0,  # Once per week
+    },
 }
 
 # Channels settings (for WebSockets)
