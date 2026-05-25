@@ -25,32 +25,63 @@ import {
   markMessagesViewed,
   markFriendRequestsViewed,
 } from './hooks/useTabBadges';
+
+// Auth & Core
 import LoginScreen from './screens/LoginScreen';
-import HomeScreen from './screens/HomeScreen';
 import RegisterScreen from './screens/RegisterScreen';
-import NoticeDetailScreen from './screens/NoticeDetailScreen';
-import CreateNoticeScreen from './screens/CreateNoticeScreen';
-import EditNoticeScreen from './screens/EditNoticeScreen';
-import ProfileScreen from './screens/ProfileScreen';
-import AdminUserListScreen from './screens/AdminUserListScreen';
-import AdminUserEditScreen from './screens/AdminUserEditScreen';
-import AdminUserCreateScreen from './screens/AdminUserCreateScreen';
-import FacultyListScreen from './screens/FacultyListScreen';
-import StudentListScreen from './screens/StudentListScreen';
-import UserProfileScreen from './screens/UserProfileScreen';
-import InboxScreen from './screens/InboxScreen';
-import ConversationScreen from './screens/ConversationScreen';
-import FriendsScreen from './screens/FriendsScreen';
-import PreferencesScreen from './screens/PreferencesScreen';
-import AnalyticsDashboardScreen from './screens/AnalyticsDashboardScreen';
-import NotificationsScreen from './screens/NotificationsScreen';
-import AdminDashboardScreen from './screens/AdminDashboardScreen';
-import ViolationsScreen from './screens/ViolationsScreen';
-import SuspendedUserScreen from './screens/SuspendedUserScreen';
 import { AuthContext, AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { registerForPushNotificationsAsync } from './push/registerPush';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+
+// Notice Screens
+import HomeScreen from './screens/HomeScreen';
+import NoticeDetailScreen from './screens/NoticeDetailScreen';
+import CreateNoticeScreen from './screens/CreateNoticeScreen';
+import EditNoticeScreen from './screens/EditNoticeScreen';
+
+// Profile & Social
+import ProfileScreen from './screens/ProfileScreen';
+import UserProfileScreen from './screens/UserProfileScreen';
+import FriendsScreen from './screens/FriendsScreen';
+import FacultyListScreen from './screens/FacultyListScreen';
+import StudentListScreen from './screens/StudentListScreen';
+
+// Messaging
+import InboxScreen from './screens/InboxScreen';
+import ConversationScreen from './screens/ConversationScreen';
+
+// Notifications & Admin
+import NotificationsScreen from './screens/NotificationsScreen';
+import AdminDashboardScreen from './screens/AdminDashboardScreen';
+import AdminUserListScreen from './screens/AdminUserListScreen';
+import AdminUserEditScreen from './screens/AdminUserEditScreen';
+import AdminUserCreateScreen from './screens/AdminUserCreateScreen';
+import AnalyticsDashboardScreen from './screens/AnalyticsDashboardScreen';
+import ViolationsScreen from './screens/ViolationsScreen';
+import SuspendedUserScreen from './screens/SuspendedUserScreen';
+import PreferencesScreen from './screens/PreferencesScreen';
+
+// NEW: Discover & Events
+import DiscoverScreen from './screens/DiscoverScreen';
+import EventsScreen from './screens/EventsScreen';
+import EventDetailScreen from './screens/EventDetailScreen';
+
+// NEW: Groups
+import GroupsScreen from './screens/GroupsScreen';
+import GroupChatScreen from './screens/GroupChatScreen';
+
+// NEW: Campus
+import CampusServicesScreen from './screens/CampusServicesScreen';
+import StaffDirectoryScreen from './screens/StaffDirectoryScreen';
+import LostFoundScreen from './screens/LostFoundScreen';
+import EmergencyContactsScreen from './screens/EmergencyContactsScreen';
+import VenueBookingScreen from './screens/VenueBookingScreen';
+import ShuttleScheduleScreen from './screens/ShuttleScheduleScreen';
+import CafeteriaMenuScreen from './screens/CafeteriaMenuScreen';
+
+// NEW: Academic
+import AcademicHubScreen from './screens/AcademicHubScreen';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -74,6 +105,20 @@ export type RootStackParamList = {
   AdminDashboard: undefined;
   Violations: undefined;
   Notifications: undefined;
+  // NEW
+  Discover: undefined;
+  Events: undefined;
+  EventDetail: { id: number };
+  Groups: undefined;
+  GroupChat: { id: number };
+  CampusServices: undefined;
+  StaffDirectory: undefined;
+  LostFound: undefined;
+  EmergencyContacts: undefined;
+  VenueBooking: undefined;
+  ShuttleSchedule: undefined;
+  CafeteriaMenu: undefined;
+  AcademicHub: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -85,7 +130,6 @@ function Router() {
 
   useEffect(() => {
     if (token && ready) {
-      // Check if user is suspended
       refreshSuspensionStatus().then((suspended) => {
         if (!suspended) {
           registerForPushNotificationsAsync();
@@ -94,16 +138,13 @@ function Router() {
     }
   }, [token, ready, refreshSuspensionStatus]);
 
-  // Invisible background refresh (X-style): quietly refetch key data without showing spinners
   useEffect(() => {
     if (!token) return;
-    const REALTIME_INTERVAL_MS = 30000; // 30 seconds - gentle background refresh
+    const REALTIME_INTERVAL_MS = 30000;
     const interval = setInterval(() => {
-      // Stagger invalidations to avoid request storms
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       setTimeout(() => queryClient.invalidateQueries({ queryKey: ['conversations'] }), 2000);
       setTimeout(() => queryClient.invalidateQueries({ queryKey: ['friend-requests'] }), 4000);
-      // Notices are already polled by HomeScreen; don't duplicate here
     }, REALTIME_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [queryClient, token]);
@@ -124,10 +165,6 @@ function Router() {
     );
   }
 
-  const AuthedTabs = () => (
-    <ThemedTabs />
-  );
-
   const ThemedTabs = () => {
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
@@ -136,22 +173,11 @@ function Router() {
 
     useEffect(() => {
       const controller = new AbortController();
-
       api
         .get('/users/profiles/me/', { signal: controller.signal })
-        .then((r) => {
-          setIsSuperuser(!!r.data.is_superuser || !!r.data.is_staff);
-        })
-        .catch((err) => {
-          if (err.name !== 'AbortError' && err.name !== 'CanceledError') {
-            console.warn('Failed to fetch user profile:', err);
-          }
-          setIsSuperuser(false);
-        });
-
-      return () => {
-        controller.abort();
-      };
+        .then((r) => setIsSuperuser(!!r.data.is_superuser || !!r.data.is_staff))
+        .catch(() => setIsSuperuser(false));
+      return () => controller.abort();
     }, []);
 
     return (
@@ -177,7 +203,6 @@ function Router() {
             shadowOffset: { width: 0, height: -3 },
             shadowOpacity: 0.12,
             shadowRadius: 8,
-            position: 'relative',
           },
           tabBarActiveTintColor: '#25D366',
           tabBarInactiveTintColor: theme.colors.muted,
@@ -185,6 +210,7 @@ function Router() {
             const map: Record<string, string> = {
               HomeTab: focused ? 'home' : 'home-outline',
               OfficialNoticesTab: focused ? 'file-document-multiple' : 'file-document-multiple-outline',
+              DiscoverTab: focused ? 'compass' : 'compass-outline',
               NotificationsTab: focused ? 'bell' : 'bell-outline',
               InboxTab: focused ? 'message-text' : 'message-outline',
               FriendsTab: focused ? 'account-multiple' : 'account-multiple-outline',
@@ -194,25 +220,14 @@ function Router() {
             const iconSize = focused ? 26 : 24;
 
             let badge: number | null = null;
-            if (route.name === 'InboxTab') {
-              badge = badges.messages;
-            } else if (route.name === 'HomeTab') {
-              badge = badges.home;
-            } else if (route.name === 'OfficialNoticesTab') {
-              badge = badges.official;
-            } else if (route.name === 'FriendsTab') {
-              badge = badges.friends;
-            } else if (route.name === 'NotificationsTab') {
-              badge = badges.notifications;
-            }
+            if (route.name === 'InboxTab') badge = badges.messages;
+            else if (route.name === 'HomeTab') badge = badges.home;
+            else if (route.name === 'OfficialNoticesTab') badge = badges.official;
+            else if (route.name === 'FriendsTab') badge = badges.friends;
+            else if (route.name === 'NotificationsTab') badge = badges.notifications;
 
             return (
-              <View style={{
-                position: 'relative',
-                alignItems: 'center',
-                justifyContent: 'center',
-                paddingTop: focused ? 2 : 0,
-              }}>
+              <View style={{ position: 'relative', alignItems: 'center', justifyContent: 'center', paddingTop: focused ? 2 : 0 }}>
                 <View style={{
                   width: focused ? 48 : 40,
                   height: focused ? 32 : 28,
@@ -223,7 +238,7 @@ function Router() {
                 }}>
                   <MaterialCommunityIcons name={name as any} color={color} size={iconSize} />
                 </View>
-                {badge && (
+                {badge ? (
                   <View style={{
                     position: 'absolute',
                     top: -2,
@@ -243,98 +258,25 @@ function Router() {
                       {badge > 99 ? '99+' : badge}
                     </Text>
                   </View>
-                )}
+                ) : null}
               </View>
             );
           },
         })}
       >
-        <Tab.Screen
-          name="HomeTab"
-          component={HomeScreen}
-          options={{ title: 'Home' }}
-          initialParams={{ mode: 'feed' }}
-          listeners={{
-            tabPress: async () => {
-              try {
-                const count = await fetchNoticesCount();
-                markNoticesViewed(count);
-              } catch {
-                // ignore
-              }
-            },
-          }}
-        />
-        <Tab.Screen
-          name="OfficialNoticesTab"
-          component={HomeScreen}
-          options={{ title: 'Official' }}
-          initialParams={{ mode: 'official' }}
-          listeners={{
-            tabPress: async () => {
-              try {
-                const count = await fetchOfficialNoticesCount();
-                markOfficialNoticesViewed(count);
-              } catch {
-                // ignore
-              }
-            },
-          }}
-        />
-        <Tab.Screen
-          name="NotificationsTab"
-          component={NotificationsScreen}
-          options={{ title: 'Alerts' }}
-          listeners={{
-            tabPress: async () => {
-              try {
-                queryClient.invalidateQueries({ queryKey: ['notifications'] });
-              } catch {
-                // ignore
-              }
-            },
-          }}
-        />
-        <Tab.Screen
-          name="InboxTab"
-          component={InboxScreen}
-          options={{ title: 'Messages' }}
-          listeners={{
-            tabPress: async () => {
-              try {
-                const count = await getUnreadMessageCount();
-                markMessagesViewed(count);
-              } catch {
-                // ignore
-              }
-            },
-          }}
-        />
-        <Tab.Screen
-          name="FriendsTab"
-          component={FriendsScreen}
-          options={{ title: 'Friends' }}
-          listeners={{
-            tabPress: async () => {
-              try {
-                const count = await fetchFriendRequestCount();
-                markFriendRequestsViewed(count);
-              } catch {
-                // ignore
-              }
-            },
-          }}
-        />
+        <Tab.Screen name="HomeTab" component={HomeScreen} options={{ title: 'Home' }} initialParams={{ mode: 'feed' }} listeners={{ tabPress: async () => { try { const count = await fetchNoticesCount(); markNoticesViewed(count); } catch {} } }} />
+        <Tab.Screen name="OfficialNoticesTab" component={HomeScreen} options={{ title: 'Official' }} initialParams={{ mode: 'official' }} listeners={{ tabPress: async () => { try { const count = await fetchOfficialNoticesCount(); markOfficialNoticesViewed(count); } catch {} } }} />
+        <Tab.Screen name="DiscoverTab" component={DiscoverScreen} options={{ title: 'Discover' }} />
+        <Tab.Screen name="NotificationsTab" component={NotificationsScreen} options={{ title: 'Alerts' }} listeners={{ tabPress: async () => { try { queryClient.invalidateQueries({ queryKey: ['notifications'] }); } catch {} } }} />
+        <Tab.Screen name="InboxTab" component={InboxScreen} options={{ title: 'Messages' }} listeners={{ tabPress: async () => { try { const count = await getUnreadMessageCount(); markMessagesViewed(count); } catch {} } }} />
+        <Tab.Screen name="FriendsTab" component={FriendsScreen} options={{ title: 'Friends' }} listeners={{ tabPress: async () => { try { const count = await fetchFriendRequestCount(); markFriendRequestsViewed(count); } catch {} } }} />
         {isSuperuser && (
-          <Tab.Screen
-            name="AdminTab"
-            component={AdminDashboardScreen}
-            options={{ title: 'Admin' }}
-          />
+          <Tab.Screen name="AdminTab" component={AdminDashboardScreen} options={{ title: 'Admin' }} />
         )}
       </Tab.Navigator>
     );
   };
+
   return (
     <Stack.Navigator initialRouteName={token ? 'Home' : 'Login'} screenOptions={{ headerShown: false }}>
       {!token ? (
@@ -344,7 +286,7 @@ function Router() {
         </>
       ) : (
         <>
-          <Stack.Screen name="Home" component={AuthedTabs} />
+          <Stack.Screen name="Home" component={ThemedTabs} />
           <Stack.Screen name="SuspendedUser" component={SuspendedUserScreen} />
           <Stack.Screen name="NoticeDetail" component={NoticeDetailScreen} />
           <Stack.Screen name="EditNotice" component={EditNoticeScreen} />
@@ -363,6 +305,20 @@ function Router() {
           <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
           <Stack.Screen name="Violations" component={ViolationsScreen} />
           <Stack.Screen name="Notifications" component={NotificationsScreen} />
+          {/* NEW SCREENS */}
+          <Stack.Screen name="Discover" component={DiscoverScreen} />
+          <Stack.Screen name="Events" component={EventsScreen} />
+          <Stack.Screen name="EventDetail" component={EventDetailScreen} />
+          <Stack.Screen name="Groups" component={GroupsScreen} />
+          <Stack.Screen name="GroupChat" component={GroupChatScreen} />
+          <Stack.Screen name="CampusServices" component={CampusServicesScreen} />
+          <Stack.Screen name="StaffDirectory" component={StaffDirectoryScreen} />
+          <Stack.Screen name="LostFound" component={LostFoundScreen} />
+          <Stack.Screen name="EmergencyContacts" component={EmergencyContactsScreen} />
+          <Stack.Screen name="VenueBooking" component={VenueBookingScreen} />
+          <Stack.Screen name="ShuttleSchedule" component={ShuttleScheduleScreen} />
+          <Stack.Screen name="CafeteriaMenu" component={CafeteriaMenuScreen} />
+          <Stack.Screen name="AcademicHub" component={AcademicHubScreen} />
         </>
       )}
     </Stack.Navigator>
@@ -386,11 +342,7 @@ export default function App() {
     },
   });
   const persister = createAsyncStoragePersister({ storage: AsyncStorage, key: 'rq-cache' });
-  persistQueryClient({
-    queryClient,
-    persister,
-    maxAge: 1000 * 60 * 60 * 24,
-  });
+  persistQueryClient({ queryClient, persister, maxAge: 1000 * 60 * 60 * 24 });
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClient}>

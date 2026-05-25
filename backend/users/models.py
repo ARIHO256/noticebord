@@ -37,6 +37,27 @@ class User(AbstractUser):
     email_verified = models.BooleanField(default=False)
     email_verification_token = models.CharField(max_length=64, blank=True)
 
+    # Campus & Alumni
+    campus = models.CharField(max_length=100, blank=True, help_text="Campus location")
+    is_alumni = models.BooleanField(default=False)
+    graduation_year = models.CharField(max_length=20, blank=True)
+
+    # Security & Auth
+    biometric_enabled = models.BooleanField(default=False)
+    two_factor_enabled = models.BooleanField(default=False)
+    last_password_change = models.DateTimeField(null=True, blank=True)
+
+    # Social & Profile
+    bio = models.TextField(blank=True)
+    cover_photo = models.ImageField(upload_to="covers/", blank=True, null=True)
+    linkedin_url = models.URLField(blank=True)
+    twitter_url = models.URLField(blank=True)
+
+    # Preferences
+    language = models.CharField(max_length=10, default="en")
+    theme_preference = models.CharField(max_length=20, default="system")  # light, dark, system
+    digest_frequency = models.CharField(max_length=20, default="never")  # never, daily, weekly
+
 
 class DeviceToken(models.Model):
     user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='device_tokens')

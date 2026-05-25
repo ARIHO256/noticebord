@@ -36,6 +36,10 @@ INSTALLED_APPS = [
     "moderation",
     "notifications",
     "audit",
+    "events",
+    "groups",
+    "campus",
+    "academic",
 ]
 
 MIDDLEWARE = [

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 NON_ACADEMIC_DEPARTMENTS = [
@@ -217,3 +218,124 @@ class NoticeShare(models.Model):
     share_method = models.CharField(max_length=20, default="copy_link")  # copy_link, messenger, external
     created_at = models.DateTimeField(auto_now_add=True)
 
+
+# ==================== NEW FEATURES ====================
+
+class Tag(models.Model):
+    name = models.SlugField(max_length=50, unique=True)
+    display_name = models.CharField(max_length=50)
+    description = models.TextField(blank=True)
+    is_trending = models.BooleanField(default=False)
+    usage_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-usage_count", "name"]
+
+    def __str__(self):
+        return self.display_name
+
+
+class NoticeTag(models.Model):
+    notice = models.ForeignKey(Notice, on_delete=models.CASCADE, related_name="notice_tags")
+    tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name="notices")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("notice", "tag")
+
+
+class Poll(models.Model):
+    notice = models.OneToOneField(Notice, on_delete=models.CASCADE, related_name="poll")
+    question = models.CharField(max_length=255)
+    is_multiple_choice = models.BooleanField(default=False)
+    is_anonymous = models.BooleanField(default=False)
+    ends_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.question
+
+    @property
+    def total_votes(self):
+        return PollVote.objects.filter(option__poll=self).count()
+
+    @property
+    def is_ended(self):
+        if self.ends_at:
+            return timezone.now() > self.ends_at
+        return False
+
+
+class PollOption(models.Model):
+    poll = models.ForeignKey(Poll, on_delete=models.CASCADE, related_name="options")
+    text = models.CharField(max_length=200)
+    display_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["display_order"]
+
+    @property
+    def vote_count(self):
+        return self.votes.count()
+
+    @property
+    def percentage(self):
+        total = self.poll.total_votes
+        if total > 0:
+            return round((self.vote_count / total) * 100, 1)
+        return 0
+
+
+class PollVote(models.Model):
+    option = models.ForeignKey(PollOption, on_delete=models.CASCADE, related_name="votes")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="poll_votes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("option", "user")
+
+
+class NoticeDraft(models.Model):
+    """Auto-saved drafts for notice creation."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notice_drafts")
+    title = models.CharField(max_length=200, blank=True)
+    description = models.TextField(blank=True)
+    department = models.CharField(max_length=100, blank=True)
+    category = models.CharField(
+        max_length=32,
+        choices=NoticeCategory.choices,
+        default=NoticeCategory.GENERAL,
+    )
+    priority = models.CharField(
+        max_length=20,
+        choices=NoticePriority.choices,
+        default=NoticePriority.NORMAL,
+    )
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    tags = models.ManyToManyField(Tag, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+
+class NoticeArchive(models.Model):
+    """Archived expired notices for historical reference."""
+    original_notice = models.OneToOneField(Notice, on_delete=models.CASCADE, related_name="archive")
+    archived_at = models.DateTimeField(auto_now_add=True)
+    archived_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    reason = models.CharField(max_length=50, default="expired")  # expired, manual, policy
+
+    class Meta:
+        ordering = ["-archived_at"]

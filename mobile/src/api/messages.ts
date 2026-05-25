@@ -154,11 +154,23 @@ export const getUnreadMessageCount = async (): Promise<number> => {
 
 export const markConversationAsRead = async (conversationId: number): Promise<void> => {
   try {
-    // Try to mark the conversation as read if the endpoint exists
-    // This may be a PATCH or POST endpoint depending on backend implementation
     await api.post(`/messages/conversations/${conversationId}/mark-as-read/`);
   } catch (error) {
-    // If endpoint doesn't exist, silently fail - the badge will still update on next refetch
     console.debug('mark-as-read endpoint not available, will update on next refetch');
   }
+};
+
+export const reactToMessage = async (messageId: number, reaction: string) => {
+  const { data } = await api.post(`/messages/messages/${messageId}/react/`, { reaction });
+  return data;
+};
+
+export const unreactFromMessage = async (messageId: number) => {
+  const { data } = await api.post(`/messages/messages/${messageId}/unreact/`);
+  return data;
+};
+
+export const forwardMessage = async (messageId: number, conversationId: number) => {
+  const { data } = await api.post(`/messages/messages/${messageId}/forward/`, { conversation_id: conversationId });
+  return data;
 };

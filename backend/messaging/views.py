@@ -1,136 +1,123 @@
 from django.db import models
 from django.utils import timezone
-from rest_framework import permissions, status, viewsets
+from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Conversation
+from .models import Conversation, ConversationMessage, MessageReaction, ConversationMute
 from .serializers import (
-    ConversationCreateSerializer,
-    ConversationMessageSerializer,
     ConversationSerializer,
-    MessageCreateSerializer,
+    ConversationMessageSerializer,
+    MessageReactionSerializer,
+    ConversationMuteSerializer,
 )
-from users.throttling import MessageRateThrottle
-from users.models import UserBlock
 
 
 class ConversationViewSet(viewsets.ModelViewSet):
     serializer_class = ConversationSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    queryset = Conversation.objects.all()
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
-        blocked_by_me = UserBlock.objects.filter(blocker=user).values_list("blocked_id", flat=True)
-        blocked_me = UserBlock.objects.filter(blocked=user).values_list("blocker_id", flat=True)
-        blocked_ids = list(set(blocked_by_me).union(set(blocked_me)))
-        return (
-            Conversation.objects.filter(models.Q(user_a=user) | models.Q(user_b=user))
-            .exclude(models.Q(user_a_id__in=blocked_ids) | models.Q(user_b_id__in=blocked_ids))
-            .select_related("user_a", "user_b", "notice", "last_message_by")
-            .order_by("-last_message_at", "-updated_at")
-        )
+        return Conversation.objects.filter(
+            models.Q(user_a=user) | models.Q(user_b=user)
+        ).distinct()
 
-    def get_serializer_class(self):
-        if self.action == "create":
-            return ConversationCreateSerializer
-        return super().get_serializer_class()
+    def perform_create(self, serializer):
+        serializer.save()
 
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data, context=self.get_serializer_context())
-        serializer.is_valid(raise_exception=True)
-        conversation, created = serializer.save_with_status()
-        output = ConversationSerializer(conversation, context=self.get_serializer_context())
-        status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
-        headers = self.get_success_headers(output.data)
-        return Response(output.data, status=status_code, headers=headers)
-
-    def retrieve(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=["get", "post"], url_path="messages", throttle_classes=[MessageRateThrottle])
+    @action(detail=True, methods=["get"], url_path="messages")
     def messages(self, request, pk=None):
-        from moderation.views import check_text_content
-        import logging
-        
-        logger = logging.getLogger(__name__)
         conversation = self.get_object()
-        
-        if request.method.lower() == "get":
-            messages_qs = conversation.messages.select_related("sender", "reply_to", "reply_to__sender").order_by("-created_at")
-            unread_qs = messages_qs.filter(read_at__isnull=True).exclude(sender=request.user)
-            unread_qs.update(read_at=timezone.now())
-            page = self.paginate_queryset(messages_qs)
-            if page is not None:
-                serializer = ConversationMessageSerializer(page, many=True, context=self.get_serializer_context())
-                return self.get_paginated_response(serializer.data)
-            serializer = ConversationMessageSerializer(messages_qs, many=True, context=self.get_serializer_context())
-            return Response(serializer.data)
-        
-        # POST request - validate message text before saving
-        message_text = request.data.get("content", "")
-        if isinstance(message_text, list):
-            message_text = message_text[0] if message_text else ""
-        
-        # Check message text for violations
-        text_result = check_text_content(message_text)
-        
-        if not text_result['is_safe']:
-            logger.warning(f"Message rejected by moderation from user {request.user.id}: {text_result['reason']}")
-            return Response(
-                {"detail": f"Message violates community guidelines: {text_result['reason']}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        serializer = MessageCreateSerializer(
-            data=request.data,
-            context={**self.get_serializer_context(), "conversation": conversation},
-        )
+        # Mark unread messages as read
+        conversation.messages.filter(read_at__isnull=True).exclude(sender=request.user).update(read_at=timezone.now())
+        qs = conversation.messages.all()
+        page = self.paginate_queryset(qs)
+        serializer = ConversationMessageSerializer(page or qs, many=True, context={"request": request})
+        return self.get_paginated_response(serializer.data) if page else Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="messages")
+    def send_message(self, request, pk=None):
+        conversation = self.get_object()
+        serializer = ConversationMessageSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        message = serializer.save()
-        output = ConversationMessageSerializer(message, context=self.get_serializer_context())
-        
-        # Broadcast via WebSocket
-        from channels.layers import get_channel_layer
-        from asgiref.sync import async_to_sync
-        
-        channel_layer = get_channel_layer()
-        if channel_layer:
-            async_to_sync(channel_layer.group_send)(
-                f"conversation_{conversation.id}",
-                {
-                    "type": "chat_message",
-                    "message": output.data,
-                }
-            )
-        
-        # Create notification for recipient
-        from notifications.signals import create_notification
-        recipient = conversation.user_b if conversation.user_a == request.user else conversation.user_a
-        create_notification(
-            user=recipient,
-            notification_type="message",
-            title=f"New message from {request.user.get_full_name() or request.user.username}",
-            message=message.content[:200] if message.content else "Attachment",
-            sender=request.user,
-            data={
-                "conversation_id": str(conversation.id),
-                "message_id": str(message.id),
-            },
-        )
-        
-        return Response(output.data, status=status.HTTP_201_CREATED)
+        msg = serializer.save(conversation=conversation, sender=request.user)
+        # Update conversation preview
+        conversation.last_message_preview = msg.content[:100] if msg.content else (msg.attachment_name or "Attachment")
+        conversation.last_message_by = request.user
+        conversation.last_message_at = timezone.now()
+        conversation.save(update_fields=["last_message_preview", "last_message_by", "last_message_at"])
+        return Response(ConversationMessageSerializer(msg, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="mark-as-read")
     def mark_as_read(self, request, pk=None):
-        """Mark all unread messages in a conversation as read."""
         conversation = self.get_object()
-        unread = conversation.messages.filter(
-            read_at__isnull=True
-        ).exclude(sender=request.user)
-        count = unread.count()
-        unread.update(read_at=timezone.now())
-        return Response({"status": "marked_as_read", "count": count})
+        conversation.messages.filter(read_at__isnull=True).exclude(sender=request.user).update(read_at=timezone.now())
+        return Response({"detail": "Marked as read."})
+
+    @action(detail=True, methods=["post"], url_path="mute")
+    def mute(self, request, pk=None):
+        conversation = self.get_object()
+        muted_until = request.data.get("muted_until")
+        mute, _ = ConversationMute.objects.update_or_create(
+            conversation=conversation,
+            user=request.user,
+            defaults={"muted_until": muted_until},
+        )
+        return Response(ConversationMuteSerializer(mute).data)
+
+    @action(detail=True, methods=["post"], url_path="unmute")
+    def unmute(self, request, pk=None):
+        conversation = self.get_object()
+        ConversationMute.objects.filter(conversation=conversation, user=request.user).delete()
+        return Response({"detail": "Unmuted."})
+
+
+class ConversationMessageViewSet(viewsets.ModelViewSet):
+    serializer_class = ConversationMessageSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return ConversationMessage.objects.filter(
+            conversation__models=Q(user_a=self.request.user) | Q(user_b=self.request.user)
+        )
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        instance.mark_edited()
+
+    @action(detail=True, methods=["post"], url_path="react")
+    def react(self, request, pk=None):
+        msg = self.get_object()
+        reaction = request.data.get("reaction", "like")
+        MessageReaction.objects.update_or_create(
+            message=msg, user=request.user, defaults={"reaction": reaction}
+        )
+        return Response({"detail": "Reaction added."})
+
+    @action(detail=True, methods=["post"], url_path="unreact")
+    def unreact(self, request, pk=None):
+        msg = self.get_object()
+        MessageReaction.objects.filter(message=msg, user=request.user).delete()
+        return Response({"detail": "Reaction removed."})
+
+    @action(detail=True, methods=["post"], url_path="forward")
+    def forward(self, request, pk=None):
+        msg = self.get_object()
+        conversation_id = request.data.get("conversation_id")
+        conversation = Conversation.objects.get(pk=conversation_id)
+        new_msg = ConversationMessage.objects.create(
+            conversation=conversation,
+            sender=request.user,
+            content=msg.content,
+            attachment=msg.attachment,
+            attachment_type=msg.attachment_type,
+            attachment_name=msg.attachment_name,
+            attachment_size=msg.attachment_size,
+            media_url=msg.media_url,
+            media_duration=msg.media_duration,
+            is_forwarded=True,
+            forwarded_from=msg,
+        )
+        return Response(ConversationMessageSerializer(new_msg, context={"request": request}).data, status=status.HTTP_201_CREATED)

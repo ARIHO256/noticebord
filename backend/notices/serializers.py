@@ -1,253 +1,289 @@
 from rest_framework import serializers
+from django.utils import timezone
+from users.serializers import MiniUserSerializer
+from .models import (
+    Notice,
+    Like,
+    Favorite,
+    Comment,
+    NoticeView,
+    Report,
+    Attachment,
+    CommentLike,
+    NoticeTemplate,
+    NoticeReminder,
+    Reaction,
+    NoticeAcknowledgment,
+    NoticeShare,
+    Tag,
+    NoticeTag,
+    Poll,
+    PollOption,
+    PollVote,
+    NoticeDraft,
+)
 
-from users.models import FriendRequest, get_friend_status
 
-from .models import Attachment, Comment, Favorite, Like, Notice, NoticeTemplate, NoticeReminder, Report
-
-
-def _get_max_depth(context: dict) -> int:
-    try:
-        return int(context.get("max_depth", 2))
-    except (TypeError, ValueError):
-        return 2
-
-
-class NoticeSerializer(serializers.ModelSerializer):
-    created_by_username = serializers.CharField(source="created_by.username", read_only=True)
-    created_by_full_name = serializers.SerializerMethodField()
-    created_by_avatar = serializers.SerializerMethodField()
-    created_by_friend_status = serializers.SerializerMethodField()
-    created_by_friend_request_id = serializers.SerializerMethodField()
-    created_by_is_staff = serializers.BooleanField(source="created_by.is_staff", read_only=True)
-    created_by_is_faculty = serializers.BooleanField(source="created_by.is_faculty", read_only=True)
-    created_by_designation = serializers.CharField(source="created_by.designation", read_only=True)
-    likes_count = serializers.IntegerField(source="likes.count", read_only=True)
-    favorites_count = serializers.IntegerField(source="favorites.count", read_only=True)
-    comments_count = serializers.IntegerField(source="comments.count", read_only=True)
-    is_liked = serializers.SerializerMethodField()
-    is_favorited = serializers.SerializerMethodField()
-
-    attachments = serializers.SerializerMethodField()
+class AttachmentSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
 
     class Meta:
-        model = Notice
-        fields = [
-            "id",
-            "title",
-            "description",
-            "created_by",
-            "department",
-            "category",
-            "is_pinned",
-            "priority",
-            "scheduled_at",
-            "expires_at",
-            "created_by_username",
-            "created_by_full_name",
-            "created_by_avatar",
-            "created_by_friend_status",
-            "created_by_friend_request_id",
-            "created_by_is_staff",
-            "created_by_is_faculty",
-            "created_by_designation",
-            "created_at",
-            "updated_at",
-            "is_active",
-            "suspension_reason",
-            "views_count",
-            "likes_count",
-            "favorites_count",
-            "comments_count",
-            "is_liked",
-            "is_favorited",
-            "attachments",
-        ]
-        read_only_fields = ["id", "created_at", "updated_at", "created_by", "created_by_username", "suspension_reason"]
-    
-    def to_representation(self, instance):
-        """Override to handle suspension_reason field gracefully if migration hasn't been run"""
-        data = super().to_representation(instance)
-        # If suspension_reason field doesn't exist on the model, return None
-        if 'suspension_reason' not in data:
-            try:
-                # Try to get the field value
-                data['suspension_reason'] = getattr(instance, 'suspension_reason', None)
-            except AttributeError:
-                # Field doesn't exist yet (migration not run)
-                data['suspension_reason'] = None
-        return data
+        model = Attachment
+        fields = ["id", "file", "file_url", "file_type", "original_name", "created_at"]
 
-    def get_is_liked(self, obj):
-        user = self.context.get("request").user if self.context.get("request") else None
-        if not user or not user.is_authenticated:
-            return False
-        return obj.likes.filter(user_id=user.id).exists()
-
-    def get_is_favorited(self, obj):
-        user = self.context.get("request").user if self.context.get("request") else None
-        if not user or not user.is_authenticated:
-            return False
-        return obj.favorites.filter(user_id=user.id).exists()
-
-    def get_created_by_full_name(self, obj):
-        fn = (obj.created_by.first_name or "").strip()
-        ln = (obj.created_by.last_name or "").strip()
-        full = (fn + " " + ln).strip()
-        return full if full else obj.created_by.username
-
-    def get_created_by_avatar(self, obj):
+    def get_file_url(self, obj):
         request = self.context.get("request")
-        avatar = getattr(obj.created_by, "avatar", None)
-        if avatar:
-            url = avatar.url
-            if request is not None:
+        if obj.file:
+            url = obj.file.url
+            if request:
                 return request.build_absolute_uri(url)
             return url
         return None
 
-    def get_created_by_friend_status(self, obj):
-        request = self.context.get("request")
-        viewer = getattr(request, "user", None) if request else None
-        return get_friend_status(viewer, obj.created_by)
 
-    def get_created_by_friend_request_id(self, obj):
-        request = self.context.get("request")
-        viewer = getattr(request, "user", None) if request else None
-        if not viewer or not getattr(viewer, "is_authenticated", False):
-            return None
-        status = get_friend_status(viewer, obj.created_by)
-        if status == "outgoing":
-            pending = FriendRequest.pending_between(viewer, obj.created_by)
-            return pending.id if pending else None
-        if status == "incoming":
-            pending = FriendRequest.pending_between(obj.created_by, viewer)
-            return pending.id if pending else None
-        return None
-
-    def get_attachments(self, obj):
-        request = self.context.get("request")
-        serializer = AttachmentSerializer(obj.attachments.all(), many=True, context={"request": request})
-        return serializer.data
-
-
-class AttachmentSerializer(serializers.ModelSerializer):
-    url = serializers.SerializerMethodField()
+class CommentSerializer(serializers.ModelSerializer):
+    user = MiniUserSerializer(read_only=True)
+    likes_count = serializers.IntegerField(source="likes.count", read_only=True)
+    replies_count = serializers.IntegerField(source="replies.count", read_only=True)
+    is_liked_by_user = serializers.SerializerMethodField()
 
     class Meta:
-        model = Attachment
-        fields = ["id", "notice", "url", "file_type", "original_name", "created_at"]
-        read_only_fields = ["id", "notice", "created_at", "url", "file_type", "original_name"]
+        model = Comment
+        fields = ["id", "notice", "user", "text", "parent", "likes_count", "replies_count", "is_liked_by_user", "created_at"]
+        read_only_fields = ["id", "user", "likes_count", "replies_count", "created_at"]
 
-    def get_url(self, obj):
-        if not obj.file:
-            return None
+    def get_is_liked_by_user(self, obj):
         request = self.context.get("request")
-        url = obj.file.url
-        if request is not None:
-            return request.build_absolute_uri(url)
-        return url
+        user = getattr(request, "user", None)
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        return obj.likes.filter(user=user).exists()
+
+
+class ReactionSerializer(serializers.ModelSerializer):
+    user = MiniUserSerializer(read_only=True)
+
+    class Meta:
+        model = Reaction
+        fields = ["id", "notice", "user", "reaction_type", "created_at"]
+        read_only_fields = ["id", "user", "created_at"]
+
+
+class TagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tag
+        fields = ["id", "name", "display_name", "description", "is_trending", "usage_count", "created_at"]
+
+
+class PollOptionSerializer(serializers.ModelSerializer):
+    vote_count = serializers.IntegerField(read_only=True)
+    percentage = serializers.FloatField(read_only=True)
+    is_voted_by_user = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PollOption
+        fields = ["id", "poll", "text", "display_order", "vote_count", "percentage", "is_voted_by_user"]
+        read_only_fields = ["id", "vote_count", "percentage"]
+
+    def get_is_voted_by_user(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        return obj.votes.filter(user=user).exists()
+
+
+class PollSerializer(serializers.ModelSerializer):
+    options = PollOptionSerializer(many=True, read_only=True)
+    total_votes = serializers.IntegerField(read_only=True)
+    is_ended = serializers.BooleanField(read_only=True)
+    has_voted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Poll
+        fields = ["id", "notice", "question", "is_multiple_choice", "is_anonymous", "ends_at", "options", "total_votes", "is_ended", "has_voted", "created_at"]
+
+    def get_has_voted(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        return PollVote.objects.filter(option__poll=obj, user=user).exists()
+
+
+class NoticeListSerializer(serializers.ModelSerializer):
+    created_by = MiniUserSerializer(read_only=True)
+    likes_count = serializers.IntegerField(source="likes.count", read_only=True)
+    comments_count = serializers.IntegerField(source="comments.count", read_only=True)
+    reactions_summary = serializers.SerializerMethodField()
+    is_liked_by_user = serializers.SerializerMethodField()
+    is_favorited_by_user = serializers.SerializerMethodField()
+    is_acknowledged_by_user = serializers.SerializerMethodField()
+    attachments = AttachmentSerializer(many=True, read_only=True)
+    tags = TagSerializer(many=True, read_only=True)
+    poll = PollSerializer(read_only=True)
+
+    class Meta:
+        model = Notice
+        fields = [
+            "id", "title", "description", "created_by", "department", "category",
+            "is_pinned", "priority", "scheduled_at", "expires_at",
+            "likes_count", "comments_count", "reactions_summary",
+            "is_liked_by_user", "is_favorited_by_user", "is_acknowledged_by_user",
+            "views_count", "attachments", "tags", "poll",
+            "is_active", "created_at", "updated_at",
+        ]
+
+    def get_reactions_summary(self, obj):
+        summary = {}
+        for rtype, _ in Reaction.ReactionType.choices:
+            count = obj.reactions.filter(reaction_type=rtype).count()
+            if count > 0:
+                summary[rtype] = count
+        return summary
+
+    def get_is_liked_by_user(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        return obj.likes.filter(user=user).exists()
+
+    def get_is_favorited_by_user(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        return obj.favorites.filter(user=user).exists()
+
+    def get_is_acknowledged_by_user(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        return obj.acknowledgments.filter(user=user).exists()
+
+
+class NoticeDetailSerializer(NoticeListSerializer):
+    comments = CommentSerializer(many=True, read_only=True)
+
+    class Meta(NoticeListSerializer.Meta):
+        fields = NoticeListSerializer.Meta.fields + ["comments", "suspension_reason"]
+
+
+class NoticeCreateUpdateSerializer(serializers.ModelSerializer):
+    tag_names = serializers.ListField(child=serializers.CharField(), write_only=True, required=False)
+    poll_question = serializers.CharField(write_only=True, required=False)
+    poll_options = serializers.ListField(child=serializers.CharField(), write_only=True, required=False)
+    poll_is_multiple = serializers.BooleanField(write_only=True, required=False, default=False)
+    poll_ends_at = serializers.DateTimeField(write_only=True, required=False)
+
+    class Meta:
+        model = Notice
+        fields = [
+            "id", "title", "description", "department", "category",
+            "priority", "scheduled_at", "expires_at", "is_pinned",
+            "tag_names", "poll_question", "poll_options", "poll_is_multiple", "poll_ends_at",
+        ]
+        read_only_fields = ["id"]
+
+    def create(self, validated_data):
+        tag_names = validated_data.pop("tag_names", [])
+        poll_question = validated_data.pop("poll_question", None)
+        poll_options = validated_data.pop("poll_options", [])
+        poll_is_multiple = validated_data.pop("poll_is_multiple", False)
+        poll_ends_at = validated_data.pop("poll_ends_at", None)
+
+        notice = Notice.objects.create(**validated_data)
+
+        # Handle tags
+        for tag_name in tag_names:
+            slug = tag_name.lower().strip().replace(" ", "-")[:50]
+            tag, _ = Tag.objects.get_or_create(name=slug, defaults={"display_name": tag_name.strip()})
+            NoticeTag.objects.get_or_create(notice=notice, tag=tag)
+            tag.usage_count = Tag.objects.filter(notice_tags__tag=tag).count()
+            tag.save()
+
+        # Handle poll
+        if poll_question and poll_options:
+            poll = Poll.objects.create(
+                notice=notice,
+                question=poll_question,
+                is_multiple_choice=poll_is_multiple,
+                ends_at=poll_ends_at,
+            )
+            for idx, opt_text in enumerate(poll_options):
+                PollOption.objects.create(poll=poll, text=opt_text, display_order=idx)
+
+        return notice
+
+    def update(self, instance, validated_data):
+        tag_names = validated_data.pop("tag_names", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if tag_names is not None:
+            instance.notice_tags.all().delete()
+            for tag_name in tag_names:
+                slug = tag_name.lower().strip().replace(" ", "-")[:50]
+                tag, _ = Tag.objects.get_or_create(name=slug, defaults={"display_name": tag_name.strip()})
+                NoticeTag.objects.get_or_create(notice=instance, tag=tag)
+
+        return instance
+
+
+class NoticeTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NoticeTemplate
+        fields = ["id", "name", "title_template", "description_template", "category", "priority", "created_by", "is_public", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_by", "created_at", "updated_at"]
+
+
+class NoticeReminderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NoticeReminder
+        fields = ["id", "notice", "remind_at", "is_sent", "created_at"]
+        read_only_fields = ["id", "is_sent", "created_at"]
 
 
 class ReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = Report
         fields = ["id", "notice", "user", "reason", "created_at"]
-        read_only_fields = ["id", "user", "created_at", "notice"]
+        read_only_fields = ["id", "user", "created_at"]
 
 
-class CommentSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(source="user.username", read_only=True)
-    user_full_name = serializers.SerializerMethodField()
-    user_avatar = serializers.SerializerMethodField()
-    parent = serializers.PrimaryKeyRelatedField(queryset=Comment.objects.all(), required=False, allow_null=True, write_only=True)
-    parent_id = serializers.IntegerField(source="parent.id", read_only=True)
-    replies = serializers.SerializerMethodField()
-    likes_count = serializers.SerializerMethodField()
-    is_liked = serializers.SerializerMethodField()
+class NoticeDraftSerializer(serializers.ModelSerializer):
+    tags = TagSerializer(many=True, read_only=True)
+    tag_names = serializers.ListField(child=serializers.CharField(), write_only=True, required=False)
 
     class Meta:
-        model = Comment
+        model = NoticeDraft
         fields = [
-            "id",
-            "notice",
-            "user",
-            "username",
-            "user_full_name",
-            "user_avatar",
-            "text",
-            "created_at",
-            "parent",
-            "parent_id",
-            "replies",
-            "likes_count",
-            "is_liked",
+            "id", "title", "description", "department", "category", "priority",
+            "scheduled_at", "expires_at", "tags", "tag_names", "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "user", "username", "user_full_name", "user_avatar", "created_at", "parent_id", "replies", "likes_count", "is_liked"]
+        read_only_fields = ["id", "created_at", "updated_at"]
 
-    def get_user_full_name(self, obj):
-        fn = (obj.user.first_name or "").strip()
-        ln = (obj.user.last_name or "").strip()
-        full = (fn + " " + ln).strip()
-        return full if full else obj.user.username
+    def create(self, validated_data):
+        tag_names = validated_data.pop("tag_names", [])
+        draft = NoticeDraft.objects.create(**validated_data)
+        for tag_name in tag_names:
+            slug = tag_name.lower().strip().replace(" ", "-")[:50]
+            tag, _ = Tag.objects.get_or_create(name=slug, defaults={"display_name": tag_name.strip()})
+            draft.tags.add(tag)
+        return draft
 
-    def get_user_avatar(self, obj):
-        request = self.context.get("request")
-        avatar = getattr(obj.user, "avatar", None)
-        if avatar:
-            url = avatar.url
-            if request is not None:
-                return request.build_absolute_uri(url)
-            return url
-        return None
-
-    def get_is_liked(self, obj):
-        request = self.context.get("request")
-        if not request or not getattr(request.user, "is_authenticated", False):
-            return False
-        return obj.likes.filter(user_id=request.user.id).exists()
-
-    def get_likes_count(self, obj):
-        return obj.likes.count()
-
-    def get_replies(self, obj):
-        depth = self.context.get("depth", 0)
-        max_depth = _get_max_depth(self.context)
-        if depth >= max_depth:
-            return []
-        qs = obj.replies.order_by("created_at")
-        serializer = CommentSerializer(
-            qs,
-            many=True,
-            context={**self.context, "depth": depth + 1},
-        )
-        return serializer.data
-
-    def validate_parent(self, value):
-        if value is None:
-            return value
-        notice_id = self.initial_data.get("notice")
-        if notice_id and str(value.notice_id) != str(notice_id):
-            raise serializers.ValidationError("Parent comment must belong to the same notice.")
-        return value
-
-
-class NoticeTemplateSerializer(serializers.ModelSerializer):
-    created_by_username = serializers.CharField(source="created_by.username", read_only=True)
-
-    class Meta:
-        model = NoticeTemplate
-        fields = [
-            "id",
-            "name",
-            "title_template",
-            "description_template",
-            "category",
-            "priority",
-            "created_by",
-            "created_by_username",
-            "is_public",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "created_at", "updated_at", "created_by", "created_by_username"]
-
+    def update(self, instance, validated_data):
+        tag_names = validated_data.pop("tag_names", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if tag_names is not None:
+            instance.tags.clear()
+            for tag_name in tag_names:
+                slug = tag_name.lower().strip().replace(" ", "-")[:50]
+                tag, _ = Tag.objects.get_or_create(name=slug, defaults={"display_name": tag_name.strip()})
+                instance.tags.add(tag)
+        return instance

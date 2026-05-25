@@ -85,6 +85,10 @@ api_v1_patterns = [
     path("moderation/", include("moderation.urls")),
     path("notifications/", include("notifications.urls")),
     path("audit/", include("audit.urls")),
+    path("events/", include("events.urls")),
+    path("groups/", include("groups.urls")),
+    path("campus/", include("campus.urls")),
+    path("academic/", include("academic.urls")),
 ]
 
 urlpatterns = [
