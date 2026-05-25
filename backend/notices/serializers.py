@@ -2,7 +2,10 @@ from rest_framework import serializers
 
 from users.models import FriendRequest, get_friend_status
 
-from .models import Attachment, Comment, Favorite, Like, Notice, NoticeTemplate, NoticeReminder, Report
+from .models import (
+    Attachment, Comment, Favorite, Like, Notice, NoticeTemplate, NoticeReminder,
+    Report, Reaction, ReactionType, NoticeAcknowledgment, NoticeShare,
+)
 
 
 def _get_max_depth(context: dict) -> int:
@@ -24,8 +27,13 @@ class NoticeSerializer(serializers.ModelSerializer):
     likes_count = serializers.IntegerField(source="likes.count", read_only=True)
     favorites_count = serializers.IntegerField(source="favorites.count", read_only=True)
     comments_count = serializers.IntegerField(source="comments.count", read_only=True)
+    reactions_count = serializers.SerializerMethodField()
+    reaction_breakdown = serializers.SerializerMethodField()
+    my_reaction = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
+    is_acknowledged = serializers.SerializerMethodField()
+    acknowledgment_count = serializers.SerializerMethodField()
 
     attachments = serializers.SerializerMethodField()
 
@@ -58,8 +66,13 @@ class NoticeSerializer(serializers.ModelSerializer):
             "likes_count",
             "favorites_count",
             "comments_count",
+            "reactions_count",
+            "reaction_breakdown",
+            "my_reaction",
             "is_liked",
             "is_favorited",
+            "is_acknowledged",
+            "acknowledgment_count",
             "attachments",
         ]
         read_only_fields = ["id", "created_at", "updated_at", "created_by", "created_by_username", "suspension_reason"]
@@ -88,6 +101,30 @@ class NoticeSerializer(serializers.ModelSerializer):
         if not user or not user.is_authenticated:
             return False
         return obj.favorites.filter(user_id=user.id).exists()
+
+    def get_reactions_count(self, obj):
+        return obj.reactions.count()
+
+    def get_reaction_breakdown(self, obj):
+        from django.db.models import Count
+        breakdown = obj.reactions.values("reaction_type").annotate(count=Count("id"))
+        return {item["reaction_type"]: item["count"] for item in breakdown}
+
+    def get_my_reaction(self, obj):
+        user = self.context.get("request").user if self.context.get("request") else None
+        if not user or not user.is_authenticated:
+            return None
+        reaction = obj.reactions.filter(user_id=user.id).first()
+        return reaction.reaction_type if reaction else None
+
+    def get_is_acknowledged(self, obj):
+        user = self.context.get("request").user if self.context.get("request") else None
+        if not user or not user.is_authenticated:
+            return False
+        return obj.acknowledgments.filter(user_id=user.id).exists()
+
+    def get_acknowledgment_count(self, obj):
+        return obj.acknowledgments.count()
 
     def get_created_by_full_name(self, obj):
         fn = (obj.created_by.first_name or "").strip()

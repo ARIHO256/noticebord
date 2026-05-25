@@ -26,6 +26,10 @@ from .models import (
     NON_ACADEMIC_DEPARTMENTS,
     NoticeView,
     Report,
+    Reaction,
+    ReactionType,
+    NoticeAcknowledgment,
+    NoticeShare,
 )
 from .serializers import AttachmentSerializer, CommentSerializer, NoticeSerializer, NoticeTemplateSerializer, ReportSerializer
 from users.throttling import CommentRateThrottle, ReportRateThrottle
@@ -592,6 +596,49 @@ class NoticeViewSet(viewsets.ModelViewSet):
         Favorite.objects.filter(notice=notice, user=request.user).delete()
         return Response({"status": "unfavorited"})
 
+    # ─── Facebook-style Reactions ───
+    @action(detail=True, methods=["post"], url_path="react")
+    def react(self, request, pk=None):
+        notice = self.get_object()
+        reaction_type = request.data.get("reaction_type", "like")
+        if reaction_type not in ReactionType.values:
+            return Response({"detail": f"Invalid reaction. Choose from {ReactionType.values}."}, status=status.HTTP_400_BAD_REQUEST)
+        Reaction.objects.update_or_create(
+            notice=notice, user=request.user,
+            defaults={"reaction_type": reaction_type}
+        )
+        return Response({"status": "reacted", "reaction_type": reaction_type})
+
+    @action(detail=True, methods=["post"], url_path="unreact")
+    def unreact(self, request, pk=None):
+        notice = self.get_object()
+        Reaction.objects.filter(notice=notice, user=request.user).delete()
+        return Response({"status": "unreacted"})
+
+    # ─── Notice Acknowledgment (compliance) ───
+    @action(detail=True, methods=["post"], url_path="acknowledge")
+    def acknowledge(self, request, pk=None):
+        notice = self.get_object()
+        if notice.priority not in ["urgent", "important"]:
+            return Response({"detail": "Only urgent or important notices require acknowledgment."}, status=status.HTTP_400_BAD_REQUEST)
+        NoticeAcknowledgment.objects.get_or_create(notice=notice, user=request.user)
+        return Response({"status": "acknowledged"})
+
+    @action(detail=True, methods=["post"], url_path="unacknowledge")
+    def unacknowledge(self, request, pk=None):
+        notice = self.get_object()
+        NoticeAcknowledgment.objects.filter(notice=notice, user=request.user).delete()
+        return Response({"status": "unacknowledged"})
+
+    # ─── Share tracking ───
+    @action(detail=True, methods=["post"], url_path="share")
+    def share(self, request, pk=None):
+        notice = self.get_object()
+        share_method = request.data.get("method", "copy_link")
+        NoticeShare.objects.create(notice=notice, user=request.user, share_method=share_method)
+        Notice.objects.filter(pk=notice.pk).update(views_count=models.F("views_count") + 1)
+        return Response({"status": "shared", "method": share_method})
+
     @action(detail=False, methods=["get"])
     def favorites(self, request):
         ids = Favorite.objects.filter(user=request.user).values_list("notice_id", flat=True)
@@ -724,8 +771,125 @@ class NoticeViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def trending(self, request):
-        # Simple heuristic: most views in recent window
-        qs = self.get_queryset().order_by("-views_count", "-created_at")[:50]
+        """Trending notices using engagement velocity algorithm."""
+        from django.db.models import Count, F, ExpressionWrapper, FloatField
+        from django.utils import timezone
+        from datetime import timedelta
+
+        now = timezone.now()
+        recent_window = now - timedelta(hours=72)
+
+        qs = (
+            self.get_queryset()
+            .filter(created_at__gte=recent_window)
+            .annotate(
+                reaction_count=Count("reactions", distinct=True),
+                comment_count=Count("comments", distinct=True),
+                share_count=Count("shares", distinct=True),
+            )
+            .annotate(
+                engagement_score=ExpressionWrapper(
+                    F("views_count") * 1.0
+                    + F("reaction_count") * 3.0
+                    + F("comment_count") * 5.0
+                    + F("share_count") * 4.0,
+                    output_field=FloatField(),
+                )
+            )
+            .order_by("-engagement_score", "-created_at")[:20]
+        )
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def feed(self, request):
+        """Personalized feed with scoring algorithm.
+        
+        Score = (recency_factor * 40) + (engagement * 30) + (priority * 20) + (relevance * 10)
+        """
+        from django.db.models import Count, F, ExpressionWrapper, FloatField, Value, Q
+        from django.utils import timezone
+        from datetime import timedelta
+
+        user = request.user
+        now = timezone.now()
+        user_dept = getattr(user, "department", "") or ""
+        user_school = getattr(user, "school", "") or ""
+
+        # Base queryset: active, not expired, not scheduled for future
+        base_qs = (
+            Notice.objects.filter(is_active=True)
+            .filter(Q(scheduled_at__isnull=True) | Q(scheduled_at__lte=now))
+            .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+        )
+
+        # Annotate engagement metrics
+        qs = base_qs.annotate(
+            reaction_count=Count("reactions", distinct=True),
+            comment_count=Count("comments", distinct=True),
+            share_count=Count("shares", distinct=True),
+        )
+
+        # Calculate recency score (exponential decay over 7 days)
+        # Use raw SQL for time difference in hours
+        from django.db.models.functions import Now
+        qs = qs.annotate(
+            age_hours=ExpressionWrapper(
+                (Now() - F("created_at")) / timedelta(hours=1),
+                output_field=FloatField(),
+            )
+        )
+
+        # Priority score
+        qs = qs.annotate(
+            priority_score=ExpressionWrapper(
+                Value(100.0) * F("is_pinned")
+                + Value(50.0) * Q(priority="urgent")
+                + Value(30.0) * Q(priority="important")
+                + Value(10.0) * Q(priority="normal"),
+                output_field=FloatField(),
+            )
+        )
+
+        # Relevance score (department/school match)
+        relevance_q = Q()
+        if user_dept:
+            relevance_q |= Q(department__iexact=user_dept) | Q(created_by__department__iexact=user_dept)
+        if user_school:
+            relevance_q |= Q(created_by__school__iexact=user_school)
+
+        qs = qs.annotate(
+            relevance_score=ExpressionWrapper(
+                Value(40.0) * relevance_q
+                + Value(20.0) * Q(created_by__is_staff=True)
+                + Value(15.0) * Q(created_by__is_faculty=True),
+                output_field=FloatField(),
+            )
+        )
+
+        # Engagement score
+        qs = qs.annotate(
+            engagement_score=ExpressionWrapper(
+                F("views_count") * 1.0
+                + F("reaction_count") * 3.0
+                + F("comment_count") * 5.0
+                + F("share_count") * 4.0,
+                output_field=FloatField(),
+            )
+        )
+
+        # Final feed score
+        qs = qs.annotate(
+            feed_score=ExpressionWrapper(
+                (100.0 / (1.0 + F("age_hours") / 24.0))  # Recency: 100 at 0h, decays
+                + F("engagement_score") * 2.0
+                + F("priority_score")
+                + F("relevance_score"),
+                output_field=FloatField(),
+            )
+        )
+
+        qs = qs.order_by("-feed_score", "-created_at")[:50]
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
 
@@ -814,13 +978,8 @@ class NoticeViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="for-you")
     def for_you(self, request):
-        base_qs = self.get_queryset().filter(
-            created_by__is_staff=False,
-            created_by__is_faculty=False,
-        )
-        qs = self.filter_queryset(base_qs)
-        serializer = self.get_serializer(qs, many=True)
-        return Response(serializer.data)
+        # Delegate to feed algorithm
+        return self.feed(request)
 
     @action(detail=False, methods=["get"], url_path="category/(?P<category>[^/]+)")
     def by_category(self, request, category: str = ""):
