@@ -1,11 +1,34 @@
 from django.db.models import Count, Q
 from django.utils import timezone
+from django.conf import settings
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 from rest_framework import generics, status, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .models import Notification, NotificationPreference
 from .serializers import NotificationSerializer, NotificationPreferenceSerializer, UnreadCountSerializer
+
+
+def _broadcast_unread_count(user):
+    if not getattr(settings, "ENABLE_WS_BROADCAST", True):
+        return
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+    count = Notification.objects.filter(user=user, is_read=False).count()
+    try:
+        async_to_sync(channel_layer.group_send)(
+            f"user_{user.id}_notifications",
+            {
+                "type": "unread_count_update",
+                "count": count,
+            },
+        )
+    except Exception:
+        # Realtime sync should never break mark-read/delete API behavior.
+        pass
 
 
 class NotificationListView(generics.ListAPIView):
@@ -50,6 +73,7 @@ class NotificationMarkReadView(APIView):
                 is_read=False,
             ).update(is_read=True, read_at=timezone.now())
         
+        _broadcast_unread_count(request.user)
         return Response({"status": "marked_as_read"})
 
 
@@ -72,6 +96,7 @@ class NotificationDeleteView(APIView):
                 is_read=True,
             ).delete()
         
+        _broadcast_unread_count(request.user)
         return Response({"status": "deleted"})
 
 

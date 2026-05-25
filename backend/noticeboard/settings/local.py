@@ -29,6 +29,7 @@ CSRF_COOKIE_SECURE = False
 
 # Celery - run tasks synchronously in local dev
 CELERY_TASK_ALWAYS_EAGER = True
+ENABLE_WS_BROADCAST = False
 
 # Disable throttling in local development to prevent 429 errors during active testing.
 # REST_FRAMEWORK is imported from base.py via settings/__init__.py; we mutate it here
@@ -36,7 +37,16 @@ CELERY_TASK_ALWAYS_EAGER = True
 from .base import REST_FRAMEWORK
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
-REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {}
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
+    "anon": "100000/hour",
+    "user": "100000/hour",
+    "login": "10000/minute",
+    "register": "10000/hour",
+    "friend_request": "10000/hour",
+    "message": "10000/hour",
+    "comment": "10000/hour",
+    "report": "10000/hour",
+}
 
 # Logging to console only in dev
 LOGGING = {

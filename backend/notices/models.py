@@ -175,3 +175,45 @@ class NoticeReminder(models.Model):
         unique_together = ("notice", "user", "remind_at")
         ordering = ["remind_at"]
 
+
+class ReactionType(models.TextChoices):
+    LIKE = "like", "Like"
+    LOVE = "love", "Love"
+    WOW = "wow", "Wow"
+    HAHA = "haha", "Haha"
+    ANGRY = "angry", "Angry"
+
+
+class Reaction(models.Model):
+    """Facebook-style reactions on notices (replaces Like)."""
+    notice = models.ForeignKey(Notice, on_delete=models.CASCADE, related_name="reactions")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notice_reactions")
+    reaction_type = models.CharField(max_length=10, choices=ReactionType.choices, default=ReactionType.LIKE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["notice", "user"], name="unique_notice_reaction"),
+        ]
+
+
+class NoticeAcknowledgment(models.Model):
+    """Students acknowledge official notices (compliance tracking)."""
+    notice = models.ForeignKey(Notice, on_delete=models.CASCADE, related_name="acknowledgments")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notice_acknowledgments")
+    acknowledged_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["notice", "user"], name="unique_notice_acknowledgment"),
+        ]
+        ordering = ["-acknowledged_at"]
+
+
+class NoticeShare(models.Model):
+    """Track when users share notices internally or externally."""
+    notice = models.ForeignKey(Notice, on_delete=models.CASCADE, related_name="shares")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notice_shares")
+    share_method = models.CharField(max_length=20, default="copy_link")  # copy_link, messenger, external
+    created_at = models.DateTimeField(auto_now_add=True)
+

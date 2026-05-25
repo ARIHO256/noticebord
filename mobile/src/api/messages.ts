@@ -6,6 +6,9 @@ export type MiniUser = {
   first_name?: string;
   last_name?: string;
   avatar_url?: string | null;
+  mutual_friend_count?: number;
+  friend_status?: 'unknown' | 'self' | 'friends' | 'incoming' | 'outgoing' | 'none';
+  friend_request_id?: number | null;
 };
 
 export type Conversation = {

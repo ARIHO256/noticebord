@@ -1,4 +1,3 @@
-import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { api } from '../api/client';
 
@@ -8,6 +7,7 @@ export async function registerForPushNotificationsAsync() {
     return;
   }
   try {
+    const Notifications = await import('expo-notifications');
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
     if (existingStatus !== 'granted') {

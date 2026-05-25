@@ -132,49 +132,27 @@ function Router() {
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
     const [isSuperuser, setIsSuperuser] = useState(false);
-    const [loadingUser, setLoadingUser] = useState(true);
     const badges = useTabBadges();
 
     useEffect(() => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => {
-        if (loadingUser) {
-          setLoadingUser(false);
-          setIsSuperuser(false);
-        }
-      }, 5000); // 5 second timeout
 
       api
         .get('/users/profiles/me/', { signal: controller.signal })
         .then((r) => {
-          clearTimeout(timeout);
           setIsSuperuser(!!r.data.is_superuser || !!r.data.is_staff);
         })
         .catch((err) => {
           if (err.name !== 'AbortError' && err.name !== 'CanceledError') {
             console.warn('Failed to fetch user profile:', err);
           }
-          clearTimeout(timeout);
           setIsSuperuser(false);
-        })
-        .finally(() => {
-          setLoadingUser(false);
         });
 
       return () => {
-        clearTimeout(timeout);
         controller.abort();
       };
     }, []);
-
-    if (loadingUser) {
-      return (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background }}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-          <Text style={{ marginTop: 16, color: theme.colors.text }}>Loading...</Text>
-        </View>
-      );
-    }
 
     return (
       <Tab.Navigator

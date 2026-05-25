@@ -81,11 +81,6 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [theme, modePreference, effectiveScheme, handleSetMode, ready]
   );
 
-  if (__DEV__) {
-    // eslint-disable-next-line no-console
-    console.log('ThemeProvider', { modePreference, systemScheme, ready, scheme: effectiveScheme });
-  }
-
   // Optional: while not ready, you could return a splash to avoid flicker
   // if (!ready) return null;
 

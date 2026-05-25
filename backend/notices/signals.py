@@ -1,5 +1,6 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.conf import settings
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from .models import Notice, Comment, Like, Report
@@ -88,9 +89,15 @@ def broadcast_comment_update(sender, instance, created, **kwargs):
     """Broadcast comment count update via WebSocket."""
     if not created:
         return
-    
+
+    if not getattr(settings, "ENABLE_WS_BROADCAST", True):
+        return
+
     channel_layer = get_channel_layer()
-    if channel_layer:
+    if not channel_layer:
+        return
+
+    try:
         async_to_sync(channel_layer.group_send)(
             f"notice_{instance.notice.id}_updates",
             {
@@ -100,3 +107,6 @@ def broadcast_comment_update(sender, instance, created, **kwargs):
                 "comment_count": instance.notice.comments.count(),
             }
         )
+    except Exception:
+        # Realtime delivery should never block notice/comment writes.
+        pass

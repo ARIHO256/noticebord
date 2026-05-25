@@ -68,13 +68,15 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def faculty(self, request):
-        qs = User.objects.filter(is_faculty=True).order_by("id")
-        return Response(UserSerializer(qs, many=True, context={"request": request}).data)
+        qs = self.get_queryset().filter(is_faculty=True).order_by("id")
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
 
     @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def students(self, request):
-        qs = User.objects.filter(is_faculty=False).order_by("id")
-        return Response(UserSerializer(qs, many=True, context={"request": request}).data)
+        qs = self.get_queryset().filter(is_faculty=False).order_by("id")
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
 
     def get_permissions(self):
         if self.action in ["update", "partial_update", "destroy", "retrieve"]:
@@ -556,7 +558,18 @@ class FriendRequestViewSet(viewsets.ModelViewSet):
         return base_qs.filter(receiver=user, status=FriendRequest.STATUS_PENDING)
 
     def perform_create(self, serializer):
-        serializer.save()
+        friend_request = serializer.save()
+        create_notification(
+            user=friend_request.receiver,
+            notification_type="friend_request",
+            title=f"{friend_request.sender.get_full_name() or friend_request.sender.username} sent you a friend request",
+            message="Open Friends to accept or decline.",
+            sender=friend_request.sender,
+            data={
+                "friend_request_id": str(friend_request.id),
+                "sender_id": str(friend_request.sender_id),
+            },
+        )
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -576,6 +589,17 @@ class FriendRequestViewSet(viewsets.ModelViewSet):
         if instance.status != FriendRequest.STATUS_PENDING:
             return Response({"detail": "This request has already been processed."}, status=status.HTTP_400_BAD_REQUEST)
         instance.accept()
+        create_notification(
+            user=instance.sender,
+            notification_type="friend_accepted",
+            title=f"{instance.receiver.get_full_name() or instance.receiver.username} accepted your friend request",
+            message="You are now friends.",
+            sender=instance.receiver,
+            data={
+                "friend_request_id": str(instance.id),
+                "receiver_id": str(instance.receiver_id),
+            },
+        )
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 

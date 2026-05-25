@@ -181,6 +181,7 @@ CHANNEL_LAYERS = {
         },
     },
 }
+ENABLE_WS_BROADCAST = os.environ.get("ENABLE_WS_BROADCAST", "1") == "1"
 
 ASGI_APPLICATION = "noticeboard.asgi.application"
 

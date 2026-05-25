@@ -1,8 +1,9 @@
 from django.test import TestCase
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
-from users.models import User
+from users.models import User, UserBlock, UserMute
 from notices.models import Notice, Comment, Like
+from notices.services import get_notice_target_users
 
 
 class NoticeTests(APITestCase):
@@ -63,6 +64,66 @@ class NoticeTests(APITestCase):
         response = client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(len(response.data["results"]) > 0)
+
+    def test_non_owner_can_report_notice(self):
+        reporter = User.objects.create_user(
+            username="reporter",
+            email="reporter@bugema.ac.ug",
+            password="pass123",
+            designation="student",
+        )
+        client = APIClient()
+        client.force_authenticate(user=reporter)
+        url = f"/api/v1/notices/{self.notice.id}/report/"
+        response = client.post(url, {"reason": "Spam content"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "reported")
+
+    def test_notice_targeting_excludes_blocked_and_muted_users(self):
+        creator = User.objects.create_user(
+            username="creator",
+            email="creator@bugema.ac.ug",
+            password="pass123",
+            designation="student",
+            department="Science",
+        )
+        visible_user = User.objects.create_user(
+            username="visible",
+            email="visible@bugema.ac.ug",
+            password="pass123",
+            designation="student",
+            department="Science",
+        )
+        blocked_user = User.objects.create_user(
+            username="blocked",
+            email="blocked@bugema.ac.ug",
+            password="pass123",
+            designation="student",
+            department="Science",
+        )
+        muted_user = User.objects.create_user(
+            username="muted",
+            email="muted@bugema.ac.ug",
+            password="pass123",
+            designation="student",
+            department="Science",
+        )
+        notice = Notice.objects.create(
+            title="Department update",
+            description="Science department notice",
+            category="campus_life",
+            priority="normal",
+            department="Science",
+            created_by=creator,
+        )
+
+        UserBlock.objects.create(blocker=blocked_user, blocked=creator)
+        UserMute.objects.create(muter=muted_user, muted=creator)
+
+        target_ids = set(get_notice_target_users(notice).values_list("id", flat=True))
+        self.assertIn(visible_user.id, target_ids)
+        self.assertNotIn(blocked_user.id, target_ids)
+        self.assertNotIn(muted_user.id, target_ids)
 
 
 class NoticePermissionsTests(APITestCase):
